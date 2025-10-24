@@ -24,13 +24,32 @@ contract BaseScript is Script {
     /////////////////////////////////////
     // --- Configure These ---
     /////////////////////////////////////
-    IERC20 internal constant token0 = IERC20(0x0165878A594ca255338adfa4d48449f69242Eb8F);
-    IERC20 internal constant token1 = IERC20(0xa513E6E4b8f2a923D98304ec87F64353C4D5C853);
-    IHooks constant hookContract = IHooks(address(0));
+
+    // USDC on Sepolia Arbitrum Fork
+    IERC20 internal constant token0 = IERC20(0x288D991A64Ed02171d0beC0DC788ad76421e1169);
+    IERC20 internal constant token1 = IERC20(0xaD60cee051579E1143e3DC425573f57Ac05A1315);
+    
+    // USDC on Sepolia Arbitrum
+    //IERC20 internal constant token0 = IERC20(0xb32Da9C3d9d0bD24b647af261818739AE303648d);
+    //IERC20 internal constant token1 = IERC20(0x69eCF8893845A267102f3b489A515dA697F7049e);
+    
+    // WBTC on Sepolia Arbitrum
+    //IERC20 internal constant token0 = IERC20(0x26a0379254f298B5d7aB19828F48B5651FA10188);
+    //IERC20 internal constant token1 = IERC20(0x6FC20bE23a51Db17e3ecad4cd48F7b91833fff88);
+    
+    //IHooks constant hookContract = IHooks(address(0));
+    IHooks constant hookContract = IHooks(0x136846383BC5a42Bc7e31470FEe31EaaE33EA080);
+
+    // load from .env (Foundry auto-loads .env in repo root)
+    // HOOK_ADDR=0x... in your .env
+    //IHooks constant hookContract = IHooks(vm.envAddress("HOOK_ADDR"));
+
     /////////////////////////////////////
 
     Currency immutable currency0;
     Currency immutable currency1;
+
+    
 
     constructor() {
         poolManager = IPoolManager(AddressConstants.getPoolManagerAddress(block.chainid));
@@ -40,9 +59,11 @@ contract BaseScript is Script {
         deployerAddress = getDeployer();
 
         (currency0, currency1) = getCurrencies();
+    
 
         vm.label(address(token0), "Token0");
         vm.label(address(token1), "Token1");
+
 
         vm.label(address(deployerAddress), "Deployer");
         vm.label(address(poolManager), "PoolManager");
@@ -60,6 +81,9 @@ contract BaseScript is Script {
             return (Currency.wrap(address(token1)), Currency.wrap(address(token0)));
         }
     }
+
+
+
 
     function getDeployer() public returns (address) {
         address[] memory wallets = vm.getWallets();
