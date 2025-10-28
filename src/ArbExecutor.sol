@@ -4,9 +4,10 @@ pragma solidity ^0.8.26;
 /**
  * ArbExecutor (Uniswap v4)
  * - Canonicalizes PoolKey (token0 < token1 by address) at construction & updates.
- * - Two atomic 2-leg arbs:
- *   1) LP < NAV  : buy yToken in LP -> redeem in vault (end with more BASE)
- *   2) LP > NAV  : deposit BASE in vault -> sell yToken in LP (end with more BASE)
+ * - Three atomic arb strategies:
+ *   1) LP < NAV  : buy yToken in LP -> instant redeem in vault (single-step)
+ *   2) LP < NAV  : buy yToken in LP -> queue redeem -> complete later (two-step)
+ *   3) LP > NAV  : deposit BASE in vault -> sell yToken in LP (single-step)
  * - Owner-only execution + pause switch + simple nonReentrant guard.
  * - Exposes poolId() to match against live pool, and poolKey() in canonical order.
  *
@@ -38,6 +39,21 @@ interface IERC4626 {
     function totalSupply() external view returns (uint256);
     function deposit(uint256 assets, address receiver) external returns (uint256 shares);
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets);
+    function convertToAssets(uint256 shares) external view returns (uint256 assets);
+    function convertToShares(uint256 assets) external view returns (uint256 shares);
+    function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares);
+}
+
+// Vault interface with two-step withdrawal
+interface IAsyncVault is IERC4626 {
+    // Your vault's actual interface - no return value, no owner param
+    function initiateWithdraw(uint256 shares) external;
+
+    
+    // For checking pending withdrawal state
+    function pendingShares(address account) external view returns (uint256);
+    function pendingUnlockAt(address account) external view returns (uint256);
+    function unlockedSharesOf(address account) external view returns (uint256);
 }
 
 // Matches your TestSwapRouter used in scripts
@@ -67,21 +83,26 @@ contract ArbExecutor {
     // Errors
     // --------
     error NotOwner();
-    error Deadline();
-    error NoProfit();
-    error MinOut();
     error Paused();
+    error Deadline();
     error BadConfig();
-    error PoolKeyMismatch(); // poolKey does not contain BASE and Y_TOKEN
+    error MinOut();
+    error NoProfit();
+    error PoolKeyMismatch();
+    error RequestNotFound();
+    error NotRequestOwner();
+    error WithdrawalNotUnlocked();
 
     // --------
     // Events
     // --------
     event ExecutedBuyThenRedeem(uint256 baseSpent, uint256 yBought, uint256 baseOut, int256 pnlBase);
     event ExecutedMintThenSell(uint256 baseIn, uint256 yMinted, uint256 baseOut, int256 pnlBase);
+    event ExecutedBuyAndQueue(uint256 baseSpent, uint256 yBought, uint256 unlockAt);
+    event CompletedQueuedRedeem(uint256 requestId, uint256 baseOut, int256 pnlBase);
     event OwnerUpdated(address indexed newOwner);
-    event PausedSet(bool on);
     event RouterUpdated(address indexed newRouter);
+    event PausedSet(bool on);
     event PoolKeyUpdated(PoolKey key);
     event ApprovalsRefreshed();
 
@@ -89,13 +110,12 @@ contract ArbExecutor {
     // Storage
     // --------
     IERC20   public immutable BASE;      // vault asset (e.g. USDC / WBTC)
-    IERC20   public immutable Y_TOKEN;   // vault share token (e.g. yBTC)
-    IERC4626 public immutable VAULT;     // ERC-4626 vault
+    IERC20   public immutable Y_TOKEN;   // vault share token (e.g. yUSDC)
+    IAsyncVault public immutable VAULT;  // ERC-4626 vault with async withdraw
     ITestSwapRouter public router;       // v4 TestSwapRouter (or compatible)
 
     PoolKey private _poolKey;            // always stored in canonical order
     
-
     address public owner;
     bool    public paused;
 
@@ -171,7 +191,7 @@ contract ArbExecutor {
         owner  = msg.sender;
         BASE   = IERC20(_base);
         Y_TOKEN= IERC20(_yToken);
-        VAULT  = IERC4626(_vault);
+        VAULT  = IAsyncVault(_vault);
         router = ITestSwapRouter(_router);
 
         _poolKey = _buildCanonicalPoolKey(_base, _yToken, _fee, _tickSpacing, _hooks);
@@ -223,10 +243,16 @@ contract ArbExecutor {
     }
 
     function _refreshApprovals() internal {
+        // For depositing BASE into vault
         _approve(BASE, address(VAULT));
+        
+        // For withdrawing: vault needs to pull yToken from us
         _approve(Y_TOKEN, address(VAULT));
+        
+        // For swapping on router
         _approve(BASE, address(router));
         _approve(Y_TOKEN, address(router));
+        
         emit ApprovalsRefreshed();
     }
 
@@ -238,7 +264,6 @@ contract ArbExecutor {
     // -----------------------
     // Views (introspection)
     // -----------------------
-    // -------- Views
     /// Canonical PoolKey (Currency, Currency, uint24, int24, IHooks) — matches your test types
     function poolKey()
         external
@@ -258,56 +283,24 @@ contract ArbExecutor {
         return PoolId.unwrap(pid);
     }
 
+    /// Check if there's a pending withdrawal and when it unlocks
+    function getPendingWithdrawal() external view returns (
+        uint256 shares,
+        uint256 unlockAt,
+        bool isReady
+    ) {
+        shares = VAULT.pendingShares(address(this));
+        unlockAt = VAULT.pendingUnlockAt(address(this));
+        isReady = (unlockAt > 0 && block.timestamp >= unlockAt);
+    }
+
 
     // ---------------
     // Arb strategies
     // ---------------
 
     /**
-     * LP < NAV:
-     *  - Spend BASE in LP to buy yToken
-     *  - Redeem yToken in vault for BASE
-     *  - Expect positive PnL in BASE
-     */
-    function arbBuyThenRedeem(
-        uint256 maxQuoteIn,
-        uint256 minYOut,
-        uint256 minBaseOut,
-        uint256 deadline
-    ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
-        if (block.timestamp > deadline) revert Deadline();
-        if (maxQuoteIn == 0) revert BadConfig();
-
-        // Sanity: pool must contain BASE and Y_TOKEN
-        if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
-
-        uint256 baseBefore = BASE.balanceOf(address(this));
-
-        // BASE -> yToken direction depends on token0/token1
-        bool zeroForOne = ( _poolKey.currency0 == Currency.wrap(address(BASE)) );
-
-        uint256 yOut = router.swapExactTokensForTokens({
-            amountIn:     maxQuoteIn,
-            amountOutMin: minYOut,
-            zeroForOne:   zeroForOne,       // BASE -> yToken
-            poolKey:      _poolKey,
-            hookData:     "",
-            receiver:     address(this),
-            deadline:     deadline
-        });
-
-        uint256 baseOut = VAULT.redeem(yOut, address(this), address(this));
-        if (baseOut < minBaseOut) revert MinOut();
-
-        uint256 baseAfter = BASE.balanceOf(address(this));
-        pnlBase = int256(baseAfter) - int256(baseBefore);
-        if (pnlBase <= 0) revert NoProfit();
-
-        emit ExecutedBuyThenRedeem(maxQuoteIn, yOut, baseOut, pnlBase);
-    }
-
-    /**
-     * LP > NAV:
+     * @notice LP > NAV:
      *  - Deposit BASE into vault to mint yToken
      *  - Sell yToken in LP for BASE
      *  - Expect positive PnL in BASE
@@ -320,8 +313,6 @@ contract ArbExecutor {
     ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
         if (block.timestamp > deadline) revert Deadline();
         if (maxBaseToMint == 0) revert BadConfig();
-
-        // Sanity: pool must contain BASE and Y_TOKEN
         if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
 
         uint256 baseBefore = BASE.balanceOf(address(this));
@@ -331,9 +322,10 @@ contract ArbExecutor {
         if (yMinted < minYShares) revert MinOut();
 
         // 2) Sell yToken -> BASE in LP
-        bool zeroForOne = ( _poolKey.currency0 == Currency.wrap(address(Y_TOKEN)) );
+        bool zeroForOne = (_poolKey.currency0 == Currency.wrap(address(Y_TOKEN)));
 
-        uint256 baseOut = router.swapExactTokensForTokens({
+        // Execute swap and measure BASE balance change
+        router.swapExactTokensForTokens({
             amountIn:     yMinted,
             amountOutMin: minQuoteOut,
             zeroForOne:   zeroForOne,       // yToken -> BASE
@@ -343,12 +335,141 @@ contract ArbExecutor {
             deadline:     deadline
         });
 
-        // 3) PnL in BASE
+        // 3) PnL in BASE (measured by balance change)
+        uint256 baseAfter = BASE.balanceOf(address(this));
+        pnlBase = int256(baseAfter) - int256(baseBefore);
+        if (pnlBase <= 0) revert NoProfit();
+        
+        uint256 baseOut = uint256(int256(baseBefore) + pnlBase); // baseAfter effectively
+
+        emit ExecutedMintThenSell(maxBaseToMint, yMinted, baseOut, pnlBase);
+    }
+
+    /**
+     * @notice LP < NAV (instant redeem):
+     *  - Spend BASE in LP to buy yToken
+     *  - Instantly redeem yToken in vault for BASE
+     *  - Expect positive PnL in BASE
+     */
+    function arbBuyThenRedeem(
+        uint256 maxQuoteIn,
+        uint256 minYOut,
+        uint256 minBaseOut,
+        uint256 deadline
+    ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
+        if (block.timestamp > deadline) revert Deadline();
+        if (maxQuoteIn == 0) revert BadConfig();
+        if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
+
+        uint256 baseBefore = BASE.balanceOf(address(this));
+
+        // BASE -> yToken direction depends on token0/token1
+        bool zeroForOne = (_poolKey.currency0 == Currency.wrap(address(BASE)));
+
+        // Execute swap and get yToken balance directly
+        uint256 yBalBefore = Y_TOKEN.balanceOf(address(this));
+        
+        router.swapExactTokensForTokens({
+            amountIn:     maxQuoteIn,
+            amountOutMin: minYOut,
+            zeroForOne:   zeroForOne,       // BASE -> yToken
+            poolKey:      _poolKey,
+            hookData:     "",
+            receiver:     address(this),
+            deadline:     deadline
+        });
+        
+        uint256 yBalAfter = Y_TOKEN.balanceOf(address(this));
+        uint256 yOut = yBalAfter - yBalBefore;
+        
+        if (yOut < minYOut) revert MinOut();
+
+        // Instant redeem (will revert if vault requires two-step)
+        uint256 baseOut = VAULT.redeem(yOut, address(this), address(this));
+        if (baseOut < minBaseOut) revert MinOut();
+
         uint256 baseAfter = BASE.balanceOf(address(this));
         pnlBase = int256(baseAfter) - int256(baseBefore);
         if (pnlBase <= 0) revert NoProfit();
 
-        emit ExecutedMintThenSell(maxBaseToMint, yMinted, baseOut, pnlBase);
+        emit ExecutedBuyThenRedeem(maxQuoteIn, yOut, baseOut, pnlBase);
+    }
+
+    /**
+     * @notice LP < NAV (Step 1 of 2 - async):
+     *  - Spend BASE in LP to buy yToken
+     *  - Initiate withdrawal request in vault
+     */
+    function arbBuyAndQueue(
+        uint256 maxQuoteIn,
+        uint256 minYOut,
+        uint256 deadline
+    ) external onlyOwner notPaused nonReentrant returns (uint256 unlockAt) {
+        if (block.timestamp > deadline) revert Deadline();
+        if (maxQuoteIn == 0) revert BadConfig();
+        if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
+
+        // 1) BASE -> yToken direction
+        bool zeroForOne = (_poolKey.currency0 == Currency.wrap(address(BASE)));
+
+        // 2) Execute swap and measure yToken balance change
+        uint256 yBalBefore = Y_TOKEN.balanceOf(address(this));
+        
+        router.swapExactTokensForTokens({
+            amountIn:     maxQuoteIn,
+            amountOutMin: minYOut,
+            zeroForOne:   zeroForOne,
+            poolKey:      _poolKey,
+            hookData:     "",
+            receiver:     address(this),
+            deadline:     deadline
+        });
+        
+        uint256 yBalAfter = Y_TOKEN.balanceOf(address(this));
+        uint256 yOut = yBalAfter - yBalBefore;
+        
+        if (yOut < minYOut) revert MinOut();
+
+        // 3) Initiate withdrawal from vault
+        // Note: vault uses msg.sender internally, only one pending request allowed
+        VAULT.initiateWithdraw(yOut);
+        
+        // 4) Get unlock time from vault
+        unlockAt = VAULT.pendingUnlockAt(address(this));
+
+        emit ExecutedBuyAndQueue(maxQuoteIn, yOut, unlockAt);
+    }
+
+    /**
+     * @notice LP < NAV (Step 2 of 2 - async):
+     *  - Complete the withdrawal request
+     *  - Calculate and return profit
+     */
+    function completeQueuedRedeem(
+        uint256 minBaseOut
+    ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
+        // Check if there's a pending withdrawal and it's ready
+        uint256 unlockAt = VAULT.pendingUnlockAt(address(this));
+        if (unlockAt == 0) revert RequestNotFound();
+        if (block.timestamp < unlockAt) revert WithdrawalNotUnlocked();
+
+        uint256 baseBefore = BASE.balanceOf(address(this));
+
+        // Complete the withdrawal (vault uses msg.sender to identify the request)
+        uint256 pendingShares = VAULT.pendingShares(address(this));
+        uint256 assetsExpected = VAULT.convertToAssets(pendingShares);
+        
+        VAULT.withdraw(assetsExpected, address(this), address(this));
+        uint256 baseAfter = BASE.balanceOf(address(this));
+        uint256 baseOut = baseAfter - baseBefore; // Measure actual assets received
+
+        if (baseOut < minBaseOut) revert MinOut();
+
+        // Calculate PnL
+        pnlBase = int256(baseAfter) - int256(baseBefore);
+        if (pnlBase <= 0) revert NoProfit();
+
+        emit CompletedQueuedRedeem(0, baseOut, pnlBase);
     }
 
     // -------------
