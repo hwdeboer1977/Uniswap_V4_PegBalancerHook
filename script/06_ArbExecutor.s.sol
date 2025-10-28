@@ -80,7 +80,9 @@ contract DeployArbExecutor is Script {
             YTOKEN,
             VAULT_ADDR,
             V4_ROUTER,
-            key
+            POOL_FEE,
+            POOL_TICK_SP,
+            IHooks(POOL_HOOKS)
         );
         
         vm.stopBroadcast();

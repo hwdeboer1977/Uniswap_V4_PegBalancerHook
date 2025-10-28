@@ -1,25 +1,35 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "forge-std/console2.sol";
+/**
+ * ArbExecutor (Uniswap v4)
+ * - Canonicalizes PoolKey (token0 < token1 by address) at construction & updates.
+ * - Two atomic 2-leg arbs:
+ *   1) LP < NAV  : buy yToken in LP -> redeem in vault (end with more BASE)
+ *   2) LP > NAV  : deposit BASE in vault -> sell yToken in LP (end with more BASE)
+ * - Owner-only execution + pause switch + simple nonReentrant guard.
+ * - Exposes poolId() to match against live pool, and poolKey() in canonical order.
+ *
+ * Notes
+ * - Router conforms to a lightweight test router interface that accepts PoolKey.
+ * - No external libraries (OZ) required; simple checks for ERC20 approvals.
+ */
+
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-/*
-  Minimal ARB_EXECUTOR for Uniswap v4 eco:
-  - Uses TestSwapRouter (same as in swap.s.sol)
-  - Atomic 2-leg arbs:
-      * LP < NAV  : buy yToken in LP -> redeem yToken in vault -> end with more BASE
-      * LP > NAV  : deposit BASE -> mint yToken in vault -> sell yToken in LP -> end with more BASE
-  - Owner-only execution. Add your own auth if you want multiple keepers.
-*/
+import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
+// ----------------------
+// Minimal interfaces
+// ----------------------
 interface IERC20 {
     function balanceOf(address) external view returns (uint256);
     function approve(address, uint256) external returns (bool);
     function transfer(address, uint256) external returns (bool);
     function transferFrom(address, address, uint256) external returns (bool);
     function decimals() external view returns (uint8);
-    function allowance(address, address) external returns(uint256);
+    function allowance(address owner, address spender) external view returns (uint256);
 }
 
 interface IERC4626 {
@@ -30,9 +40,7 @@ interface IERC4626 {
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets);
 }
 
-/* --------
-   TestSwapRouter Interface (matches swap.s.sol)
-   -------- */
+// Matches your TestSwapRouter used in scripts
 interface ITestSwapRouter {
     /// @notice Swap exact input tokens for output tokens
     /// @param amountIn Exact amount of input tokens to swap
@@ -55,204 +63,297 @@ interface ITestSwapRouter {
 }
 
 contract ArbExecutor {
+    // --------
+    // Errors
+    // --------
     error NotOwner();
     error Deadline();
     error NoProfit();
     error MinOut();
+    error Paused();
+    error BadConfig();
+    error PoolKeyMismatch(); // poolKey does not contain BASE and Y_TOKEN
 
-    IERC20    public immutable BASE;        // WBTC or USDC (vault asset / LP quote)
-    IERC20    public immutable Y_TOKEN;     // yBTC (ERC-4626 share token)
-    IERC4626  public immutable VAULT;       // yBTC vault
-    ITestSwapRouter public router;          // TestSwapRouter (pluggable)
+    // --------
+    // Events
+    // --------
+    event ExecutedBuyThenRedeem(uint256 baseSpent, uint256 yBought, uint256 baseOut, int256 pnlBase);
+    event ExecutedMintThenSell(uint256 baseIn, uint256 yMinted, uint256 baseOut, int256 pnlBase);
+    event OwnerUpdated(address indexed newOwner);
+    event PausedSet(bool on);
+    event RouterUpdated(address indexed newRouter);
+    event PoolKeyUpdated(PoolKey key);
+    event ApprovalsRefreshed();
 
-    // v4 PoolKey (as used by your pool)
-    PoolKey public poolKey;
+    // --------
+    // Storage
+    // --------
+    IERC20   public immutable BASE;      // vault asset (e.g. USDC / WBTC)
+    IERC20   public immutable Y_TOKEN;   // vault share token (e.g. yBTC)
+    IERC4626 public immutable VAULT;     // ERC-4626 vault
+    ITestSwapRouter public router;       // v4 TestSwapRouter (or compatible)
+
+    PoolKey private _poolKey;            // always stored in canonical order
+    
 
     address public owner;
     bool    public paused;
 
-    event ExecutedBuyThenRedeem(uint256 baseSpent, uint256 yBought, uint256 baseOut, int256 pnlBase);
-    event ExecutedMintThenSell(uint256 baseIn, uint256 yMinted, uint256 baseOut, int256 pnlBase);
-    event OwnerUpdated(address indexed newOwner);
-    event Paused(bool on);
-    event RouterUpdated(address indexed newRouter);
-    event PoolKeyUpdated(PoolKey key);
+    // simple nonReentrancy
+    uint256 private _locked;
 
+    // --------
+    // Modifiers
+    // --------
     modifier onlyOwner() {
-        _onlyOwner();
-        _;
-    }
-            
-    function _onlyOwner() internal {
         if (msg.sender != owner) revert NotOwner();
-    }
-           
-        
-    modifier notPaused() {
-        _notPaused();
         _;
-    }
-            
-    function _notPaused() internal view {
-        if (paused) revert("paused");
     }
 
+    modifier notPaused() {
+        if (paused) revert Paused();
+        _;
+    }
+
+    modifier nonReentrant() {
+        require(_locked == 0, "REENTRANCY");
+        _locked = 1;
+        _;
+        _locked = 0;
+    }
+
+    // -----------------
+    // Canonical helpers
+    // -----------------
+    function _normalize(address a, address b) internal pure returns (address c0, address c1) {
+        (c0, c1) = a < b ? (a, b) : (b, a);
+    }
+
+    function _buildCanonicalPoolKey(
+        address a,
+        address b,
+        uint24 fee,
+        int24 tickSpacing,
+        IHooks hooks
+    ) internal pure returns (PoolKey memory k) {
+        (address c0, address c1) = _normalize(a, b);
+        k = PoolKey({
+            currency0: Currency.wrap(c0),
+            currency1: Currency.wrap(c1),
+            fee: fee,
+            tickSpacing: tickSpacing,
+            hooks: hooks
+        });
+    }
+
+    function _poolContainsBaseAndY(PoolKey memory k) internal view returns (bool) {
+        address c0 = Currency.unwrap(k.currency0);
+        address c1 = Currency.unwrap(k.currency1);
+        address base = address(BASE);
+        address y = address(Y_TOKEN);
+        return (c0 == base && c1 == y) || (c0 == y && c1 == base);
+    }
+
+    // -----------
+    // Constructor
+    // -----------
     constructor(
         address _base,
         address _yToken,
         address _vault,
         address _router,
-        PoolKey memory _poolKey
+        uint24  _fee,
+        int24   _tickSpacing,
+        IHooks  _hooks
     ) {
-        owner = msg.sender;
+        if (_base == address(0) || _yToken == address(0) || _vault == address(0) || _router == address(0)) revert BadConfig();
+
+        owner  = msg.sender;
         BASE   = IERC20(_base);
-        Y_TOKEN = IERC20(_yToken);
+        Y_TOKEN= IERC20(_yToken);
         VAULT  = IERC4626(_vault);
         router = ITestSwapRouter(_router);
-        poolKey = _poolKey;
 
-        // Max approvals to vault and router (gas-optimized execution)
-        require(BASE.approve(_vault, type(uint256).max), "BASE vault approval failed");
-        require(Y_TOKEN.approve(_vault, type(uint256).max), "Y_TOKEN vault approval failed");
-        require(BASE.approve(_router, type(uint256).max), "BASE router approval failed");
-        require(Y_TOKEN.approve(_router, type(uint256).max), "Y_TOKEN router approval failed");
+        _poolKey = _buildCanonicalPoolKey(_base, _yToken, _fee, _tickSpacing, _hooks);
+        if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
+
+        // Max approvals (gas-optimized execution)
+        _refreshApprovals();
     }
 
-    /* =========
-       Admin
-       ========= */
-    function setOwner(address n) external onlyOwner { owner = n; emit OwnerUpdated(n); }
-    function setPaused(bool on) external onlyOwner { paused = on; emit Paused(on); }
-    function setRouter(address r) external onlyOwner { router = ITestSwapRouter(r); emit RouterUpdated(r); }
-    function setPoolKey(PoolKey calldata k) external onlyOwner { poolKey = k; emit PoolKeyUpdated(k); }
+    // -------------------
+    // Admin / maintenance
+    // -------------------
+    function setOwner(address n) external onlyOwner {
+        owner = n;
+        emit OwnerUpdated(n);
+    }
 
-    /* ===============================
-       LP < NAV : buy y -> redeem y
-       =============================== */
-    /// @param maxQuoteIn  maximum BASE you will spend to buy yToken in LP
-    /// @param minYOut     minimum yToken expected from the LP swap (set 0 if you rely on minBaseOut)
-    /// @param minBaseOut  minimum BASE you must receive from redeem; protects PnL
-    /// @param deadline    unix timestamp
+    function setPaused(bool on) external onlyOwner {
+        paused = on;
+        emit PausedSet(on);
+    }
+
+    function setRouter(address r) external onlyOwner {
+        if (r == address(0)) revert BadConfig();
+        router = ITestSwapRouter(r);
+        // re-approve in case router changed
+        _approve(BASE, r);
+        _approve(Y_TOKEN, r);
+        emit RouterUpdated(r);
+    }
+
+    /// @notice Set a new PoolKey from token addresses + params; enforced canonical order.
+    function setPoolKeyFromTokens(
+        address a,
+        address b,
+        uint24  fee,
+        int24   tickSpacing,
+        IHooks  hooks
+    ) external onlyOwner {
+        PoolKey memory k = _buildCanonicalPoolKey(a, b, fee, tickSpacing, hooks);
+        if (!_poolContainsBaseAndY(k)) revert PoolKeyMismatch();
+        _poolKey = k;
+        emit PoolKeyUpdated(k);
+    }
+
+    /// @notice Re-approve vault & router spend (MAX).
+    function refreshApprovals() external onlyOwner {
+        _refreshApprovals();
+    }
+
+    function _refreshApprovals() internal {
+        _approve(BASE, address(VAULT));
+        _approve(Y_TOKEN, address(VAULT));
+        _approve(BASE, address(router));
+        _approve(Y_TOKEN, address(router));
+        emit ApprovalsRefreshed();
+    }
+
+    function _approve(IERC20 token, address spender) internal {
+        // set to max; some tokens require first setting to 0, but we assume standard ERC20 here
+        require(token.approve(spender, type(uint256).max), "approve failed");
+    }
+
+    // -----------------------
+    // Views (introspection)
+    // -----------------------
+    // -------- Views
+    /// Canonical PoolKey (Currency, Currency, uint24, int24, IHooks) — matches your test types
+    function poolKey()
+        external
+        view
+        returns (Currency currency0, Currency currency1, uint24 fee, int24 tickSpacing, IHooks hooks)
+    {
+        currency0   = _poolKey.currency0;
+        currency1   = _poolKey.currency1;
+        fee         = _poolKey.fee;
+        tickSpacing = _poolKey.tickSpacing;
+        hooks       = _poolKey.hooks;
+    }
+
+    /// bytes32 PoolId (unwrap the PoolId type)
+    function poolId() external view returns (bytes32) {
+        PoolId pid = PoolIdLibrary.toId(_poolKey);
+        return PoolId.unwrap(pid);
+    }
+
+
+    // ---------------
+    // Arb strategies
+    // ---------------
+
+    /**
+     * LP < NAV:
+     *  - Spend BASE in LP to buy yToken
+     *  - Redeem yToken in vault for BASE
+     *  - Expect positive PnL in BASE
+     */
     function arbBuyThenRedeem(
         uint256 maxQuoteIn,
         uint256 minYOut,
         uint256 minBaseOut,
         uint256 deadline
-    ) external onlyOwner notPaused returns (int256 pnlBase) {
+    ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
         if (block.timestamp > deadline) revert Deadline();
+        if (maxQuoteIn == 0) revert BadConfig();
+
+        // Sanity: pool must contain BASE and Y_TOKEN
+        if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
 
         uint256 baseBefore = BASE.balanceOf(address(this));
-        console2.log("Balance BASE before:", baseBefore);
 
-        // 1) Swap BASE -> yToken in the LP
-        // Determine swap direction based on pool token ordering
-        bool zeroForOne = (poolKey.currency0 == Currency.wrap(address(BASE)));
-        
-        // Sanity check: ensure pool contains both tokens
-        require(
-            (poolKey.currency0 == Currency.wrap(address(BASE)) && poolKey.currency1 == Currency.wrap(address(Y_TOKEN))) ||
-            (poolKey.currency0 == Currency.wrap(address(Y_TOKEN)) && poolKey.currency1 == Currency.wrap(address(BASE))),
-            "poolKey mismatch"
-        );
-
-        bytes memory hookData = new bytes(0); // Empty hook data
+        // BASE -> yToken direction depends on token0/token1
+        bool zeroForOne = ( _poolKey.currency0 == Currency.wrap(address(BASE)) );
 
         uint256 yOut = router.swapExactTokensForTokens({
-            amountIn: maxQuoteIn,
+            amountIn:     maxQuoteIn,
             amountOutMin: minYOut,
-            zeroForOne: zeroForOne,
-            poolKey: poolKey,
-            hookData: hookData,
-            receiver: address(this),
-            deadline: deadline
+            zeroForOne:   zeroForOne,       // BASE -> yToken
+            poolKey:      _poolKey,
+            hookData:     "",
+            receiver:     address(this),
+            deadline:     deadline
         });
 
-        console2.log("yToken received from swap:", yOut);
-
-        // 2) Redeem yToken at the vault to receive BASE
         uint256 baseOut = VAULT.redeem(yOut, address(this), address(this));
         if (baseOut < minBaseOut) revert MinOut();
 
-        console2.log("BASE received from redeem:", baseOut);
-
-        // 3) Compute PnL in BASE
         uint256 baseAfter = BASE.balanceOf(address(this));
         pnlBase = int256(baseAfter) - int256(baseBefore);
         if (pnlBase <= 0) revert NoProfit();
 
-        console2.log("PnL (BASE):", uint256(pnlBase));
-
         emit ExecutedBuyThenRedeem(maxQuoteIn, yOut, baseOut, pnlBase);
     }
 
-    /* =================================
-       LP > NAV : mint y -> sell y
-       ================================= */
-    /// @param maxBaseToMint  amount of BASE to deposit into the vault
-    /// @param minYShares     minimum yToken shares expected from vault (post fee)
-    /// @param minQuoteOut    minimum BASE to receive from selling yToken in LP
-    /// @param deadline       unix timestamp
+    /**
+     * LP > NAV:
+     *  - Deposit BASE into vault to mint yToken
+     *  - Sell yToken in LP for BASE
+     *  - Expect positive PnL in BASE
+     */
     function arbMintThenSell(
         uint256 maxBaseToMint,
         uint256 minYShares,
         uint256 minQuoteOut,
         uint256 deadline
-    ) external onlyOwner notPaused returns (int256 pnlBase) {
-        // Check deadline
+    ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
         if (block.timestamp > deadline) revert Deadline();
-        
-        uint256 baseBefore = BASE.balanceOf(address(this));
-        console2.log("Balance BASE before:", baseBefore);
+        if (maxBaseToMint == 0) revert BadConfig();
 
-        // 1) Deposit BASE -> mint yToken
+        // Sanity: pool must contain BASE and Y_TOKEN
+        if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
+
+        uint256 baseBefore = BASE.balanceOf(address(this));
+
+        // 1) Mint yToken by depositing BASE into the vault
         uint256 yMinted = VAULT.deposit(maxBaseToMint, address(this));
         if (yMinted < minYShares) revert MinOut();
-        
-        uint256 yieldAfterMint = Y_TOKEN.balanceOf(address(this));
-        console2.log("Balance yToken after mint:", yieldAfterMint);
 
-        // Verify router approval (should already be set in constructor)
-        uint256 allowanceY = Y_TOKEN.allowance(address(this), address(router));
-        console2.log("Allowance (yToken -> router):", allowanceY);
-
-        // 2) Swap yToken -> BASE in the LP
-        // Determine swap direction: we're selling yToken for BASE
-        bool zeroForOne = (poolKey.currency0 == Currency.wrap(address(Y_TOKEN)));
-
-        // Sanity check: pool ordering must be (BASE, yToken) or (yToken, BASE)
-        require(
-            (poolKey.currency0 == Currency.wrap(address(BASE)) && poolKey.currency1 == Currency.wrap(address(Y_TOKEN))) ||
-            (poolKey.currency0 == Currency.wrap(address(Y_TOKEN)) && poolKey.currency1 == Currency.wrap(address(BASE))),
-            "poolKey mismatch"
-        );
-
-        bytes memory hookData = new bytes(0); // Empty hook data
+        // 2) Sell yToken -> BASE in LP
+        bool zeroForOne = ( _poolKey.currency0 == Currency.wrap(address(Y_TOKEN)) );
 
         uint256 baseOut = router.swapExactTokensForTokens({
-            amountIn: yMinted,
+            amountIn:     yMinted,
             amountOutMin: minQuoteOut,
-            zeroForOne: zeroForOne,
-            poolKey: poolKey,
-            hookData: hookData,
-            receiver: address(this),
-            deadline: deadline
+            zeroForOne:   zeroForOne,       // yToken -> BASE
+            poolKey:      _poolKey,
+            hookData:     "",
+            receiver:     address(this),
+            deadline:     deadline
         });
 
-        console2.log("BASE received from swap:", baseOut);
-
-        // 3) Compute PnL in BASE
+        // 3) PnL in BASE
         uint256 baseAfter = BASE.balanceOf(address(this));
         pnlBase = int256(baseAfter) - int256(baseBefore);
         if (pnlBase <= 0) revert NoProfit();
 
-        console2.log("PnL (BASE):", uint256(pnlBase));
-
         emit ExecutedMintThenSell(maxBaseToMint, yMinted, baseOut, pnlBase);
     }
 
-    /* =========
-       Rescue
-       ========= */
+    // -------------
+    // Asset rescue
+    // -------------
     function sweep(address token, address to, uint256 amount) external onlyOwner {
         require(IERC20(token).transfer(to, amount), "sweep failed");
     }

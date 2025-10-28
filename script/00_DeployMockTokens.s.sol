@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 // Run on Sepolia Arbitrum:
 // 1. set -a; source .env; set +a
-// 2. forge script script/DeployMockTokens.s.sol:DeployMockTokens --rpc-url arbitrum_sepolia --broadcast -vvvv
+// 2. forge script script/00_DeployMockTokens.s.sol:DeployMockTokens --rpc-url arbitrum_sepolia --broadcast -vvvv
 
 // Run on anvil:
 // 1. anvil --fork-url <RPC LINK>
@@ -21,7 +21,7 @@ contract DeployMockTokens is Script {
         // --- Env ---
         // PRIVATE_KEY: uint256 private key of deployer
         // RECIPIENT: address receiving initial supply (e.g., your EOA)
-        uint256 pk = vm.envUint("WALLET_SECRET");
+        uint256 pk = vm.envUint("PRIVATE_KEY");
         address recipient = vm.envAddress("WALLET_ADDRESS");
 
         uint256 usdcHuman = uint256(100_000_000);

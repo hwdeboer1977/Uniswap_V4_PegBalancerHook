@@ -4,6 +4,12 @@ pragma solidity ^0.8.24;
 import "forge-std/Script.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+// On testnet
+// set -a; source .env; set +a
+// forge script script/01b_DepositVault.s.sol:DepositVault --rpc-url arbitrum_sepolia --broadcast -vv
+
+
+// On Anvil
 // 1. set -a; source .env.anvil; set +a
 // 2. forge script script/01b_DepositVault.s.sol:DepositVault --rpc-url http://127.0.0.1:8545 --broadcast -vvvv --via-ir
 

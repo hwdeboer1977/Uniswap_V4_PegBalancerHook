@@ -45,7 +45,7 @@ contract SwapScript is BaseScript {
         swapRouter.swapExactTokensForTokens({
             amountIn: 10e6,
             amountOutMin: 0, // Very bad, but we want to allow for unlimited price impact
-            zeroForOne: true,
+            zeroForOne: false,
             poolKey: poolKey,
             hookData: hookData,
             receiver: recipient,

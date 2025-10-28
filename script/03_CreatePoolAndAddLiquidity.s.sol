@@ -11,6 +11,10 @@ import {LiquidityHelpers} from "./base/LiquidityHelpers.sol";
 import {console2} from "forge-std/console2.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
+
+// forge script script/03_CreatePoolAndAddLiquidity.s.sol --rpc-url arbitrum_sepolia --private-key 0xYOUR_PRIVATE_KEY --broadcast -vvvv --via-ir
+
+// Anvil
 // 1. set -a; source .env.anvil; set +a
 // 2. forge script script/03_CreatePoolAndAddLiquidity.s.sol --rpc-url http://127.0.0.1:8545 --private-key 0xYOUR_PRIVATE_KEY --broadcast -vvvv --via-ir
 

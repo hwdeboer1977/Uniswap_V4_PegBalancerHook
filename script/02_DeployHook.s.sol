@@ -8,8 +8,12 @@ import {BaseScript} from "./base/BaseScript.sol";
 import {PegHook} from "../src/PegHook.sol";
 
 import "forge-std/Script.sol";
+
+// Testnet
 // forge script script/02_DeployHook.s.sol  --rpc-url arbitrum_sepolia --private-key 0xYOUR_PRIVATE_KEY --broadcast
 
+
+// Anvil:
 // 1. set -a; source .env.anvil; set +a
 // 2. forge script script/02_DeployHook.s.sol --rpc-url http://127.0.0.1:8545 --private-key 0xYOUR_PRIVATE_KEY --broadcast -vvvv --via-ir
 
@@ -26,7 +30,7 @@ contract DeployHookScript is BaseScript {
     function run() public {
 
         
-        address vault = 0xaD60cee051579E1143e3DC425573f57Ac05A1315;
+        address vault = 0x41de4987ba19D073383c99EB3068B3e29A5C710e;
         //address vault = 0xb32Da9C3d9d0bD24b647af261818739AE303648d;
         //address vault = 0x6FC20bE23a51Db17e3ecad4cd48F7b91833fff88;
         //address vault = vm.envOr("TOKEN_VAULT", address(0));

@@ -5,6 +5,9 @@ import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 
 
+// Sepolia Arbitrum
+// forge test test/ArbExecutor.t.sol -vvvv --rpc-url arbitrum_sepolia 
+
 // set -a; source .env.anvil; set +a
 // Note: our scripts worked because they all ran against your Anvil node and in the same live chain state
 // forge test spins up an isolated in-memory VM (no contracts deployed).
@@ -193,162 +196,162 @@ contract ArbExecutorTest is Test {
     // --- Basic Tests ---
     /////////////////////////////////////
     
-    // function test_Setup() public view {
-    //     // Verify contracts are deployed
-    //     assertTrue(address(poolManager) != address(0), "PoolManager not set");
-    //     assertTrue(address(token0) != address(0), "Token0 not set");
-    //     assertTrue(address(token1) != address(0), "Token1 not set");
+    function test_Setup() public view {
+        // Verify contracts are deployed
+        assertTrue(address(poolManager) != address(0), "PoolManager not set");
+        assertTrue(address(token0) != address(0), "Token0 not set");
+        assertTrue(address(token1) != address(0), "Token1 not set");
         
-    //     // Verify pool exists
-    //     (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
-    //     assertTrue(sqrtPriceX96 > 0, "Pool not initialized");
+        // Verify pool exists
+        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
+        assertTrue(sqrtPriceX96 > 0, "Pool not initialized");
         
-    //     console2.log("All contracts deployed and pool initialized");
-    // }
+        console2.log("All contracts deployed and pool initialized");
+    }
     
-    // function test_CheckBalances() public view {
-    //     uint256 balance0 = token0.balanceOf(deployer);
-    //     uint256 balance1 = token1.balanceOf(deployer);
+    function test_CheckBalances() public view {
+        uint256 balance0 = token0.balanceOf(deployer);
+        uint256 balance1 = token1.balanceOf(deployer);
         
-    //     console2.log("Deployer Token0 balance:", balance0 / 1e6, "USDC");
-    //     console2.log("Deployer Token1 balance:", balance1 / 1e18, "WBTC");
+        console2.log("Deployer Token0 balance:", balance0 / 1e6, "USDC");
+        console2.log("Deployer Token1 balance:", balance1 / 1e18, "WBTC");
         
-    //     assertTrue(balance0 > 0, "No Token0 balance");
-    //     assertTrue(balance1 > 0, "No Token1 balance");
-    // }
+        assertTrue(balance0 > 0, "No Token0 balance");
+        assertTrue(balance1 > 0, "No Token1 balance");
+    }
     
-    // function test_PoolState() public view {
-    //     _logPoolState();
+    function test_PoolState() public view {
+        _logPoolState();
         
-    //     (uint160 sqrtPriceX96, int24 tick,,) = poolManager.getSlot0(poolKey.toId());
+        (uint160 sqrtPriceX96, int24 tick,,) = poolManager.getSlot0(poolKey.toId());
         
-    //     assertTrue(sqrtPriceX96 > 0, "Invalid price");
-    //     assertTrue(tick != 0 || sqrtPriceX96 == 79228162514264337593543950336, "Invalid tick");
+        assertTrue(sqrtPriceX96 > 0, "Invalid price");
+        assertTrue(tick != 0 || sqrtPriceX96 == 79228162514264337593543950336, "Invalid tick");
         
-    //     console2.log("Pool state is valid");
-    // }
+        console2.log("Pool state is valid");
+    }
     
-    // function test_SimpleSwap() public {
+    function test_SimpleSwap() public {
       
-    //     uint256 swapAmount = 1e6; // 1 USDC
+        uint256 swapAmount = 1e6; // 1 USDC
        
         
-    //     console2.log("=== Before Swap ===");
-    //     console2.log("Owner Token0:", token0.balanceOf(deployer) / 1e6);
-    //     console2.log("Owner Token1:", token1.balanceOf(deployer) / 1e6);
-    //     _logPoolState();
+        console2.log("=== Before Swap ===");
+        console2.log("Owner Token0:", token0.balanceOf(deployer) / 1e6);
+        console2.log("Owner Token1:", token1.balanceOf(deployer) / 1e6);
+        _logPoolState();
     
     
-    //     bytes memory hookData = new bytes(0);
+        bytes memory hookData = new bytes(0);
 
-    //     // choose direction & price bound (NOT slippage)
-    //     bool zeroForOne = true;                  // token0 -> token1
-    //     uint256 amountIn = 10e6;                 // 10 USDC if token0 has 6 decimals
-    //     uint160 sqrtPriceLimitX96 = zeroForOne
-    //         ? TickMath.getSqrtPriceAtTick(TickMath.MIN_TICK + 1)
-    //         : TickMath.getSqrtPriceAtTick(TickMath.MAX_TICK - 1);
+        // choose direction & price bound (NOT slippage)
+        bool zeroForOne = true;                  // token0 -> token1
+        uint256 amountIn = 10e6;                 // 10 USDC if token0 has 6 decimals
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.getSqrtPriceAtTick(TickMath.MIN_TICK + 1)
+            : TickMath.getSqrtPriceAtTick(TickMath.MAX_TICK - 1);
 
-    //     // Perform swap: Token0 -> Token1
-    //     vm.startPrank(deployer);
+        // Perform swap: Token0 -> Token1
+        vm.startPrank(deployer);
 
-    //     // approve input token 
-    //     token0.approve(address(swapRouter), type(uint256).max);
-    //     token1.approve(address(swapRouter), type(uint256).max);
+        // approve input token 
+        token0.approve(address(swapRouter), type(uint256).max);
+        token1.approve(address(swapRouter), type(uint256).max);
 
-    //     //METHOD 1: PoolSwapTest
-    //     // pack params + settings
-    //     SwapParams memory params = SwapParams({
-    //         zeroForOne: zeroForOne,
-    //         amountSpecified: int256(amountIn),     // positive => exact-in
-    //         sqrtPriceLimitX96: sqrtPriceLimitX96
-    //     });
+        //METHOD 1: PoolSwapTest
+        // pack params + settings
+        SwapParams memory params = SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: int256(amountIn),     // positive => exact-in
+            sqrtPriceLimitX96: sqrtPriceLimitX96
+        });
 
-    //     PoolSwapTest.TestSettings memory settings = PoolSwapTest.TestSettings({
-    //         takeClaims: false,
-    //         settleUsingBurn: false
-    //     });
+        PoolSwapTest.TestSettings memory settings = PoolSwapTest.TestSettings({
+            takeClaims: false,
+            settleUsingBurn: false
+        });
 
-    //     // do the swap
-    //     swapRouter.swap(poolKey, params, settings, "");
+        // do the swap
+        swapRouter.swap(poolKey, params, settings, "");
         
-    //     console2.log("=== After Swap ===");
-    //     console2.log("Owner Token0:", token0.balanceOf(deployer) / 1e6);
-    //     console2.log("Owner Token1:", token1.balanceOf(deployer) / 1e18);
-    //     _logPoolState();
+        console2.log("=== After Swap ===");
+        console2.log("Owner Token0:", token0.balanceOf(deployer) / 1e6);
+        console2.log("Owner Token1:", token1.balanceOf(deployer) / 1e18);
+        _logPoolState();
         
-    //     // Verify swap worked
-    //     assertTrue(token0.balanceOf(deployer) < swapAmount * 2, "Token0 not spent");
-    //     assertTrue(token1.balanceOf(deployer) > 0, "Token1 not received");
+        // Verify swap worked
+        assertTrue(token0.balanceOf(deployer) < swapAmount * 2, "Token0 not spent");
+        assertTrue(token1.balanceOf(deployer) > 0, "Token1 not received");
         
-    //     console2.log("Swap successful");
-    // }
+        console2.log("Swap successful");
+    }
 
-    // function test_SimpleSwap2() public {
-    //     bool zeroForOne = true;
-    //     uint256 amountIn = 100e6;
+    function test_SimpleSwap2() public {
+        bool zeroForOne = true;
+        uint256 amountIn = 100e6;
 
-    //     address owner   = vm.envAddress("WALLET_ADDRESS");
-    //     address tokenIn = Currency.unwrap(zeroForOne ? poolKey.currency0 : poolKey.currency1);
+        address owner   = vm.envAddress("WALLET_ADDRESS");
+        address tokenIn = Currency.unwrap(zeroForOne ? poolKey.currency0 : poolKey.currency1);
 
-    //     // approve router as spender of the *input* token from the *owner*
-    //     vm.startPrank(owner);
-    //     IERC20(tokenIn).approve(address(router), type(uint256).max);
-    //     vm.stopPrank();
+        // approve router as spender of the *input* token from the *owner*
+        vm.startPrank(owner);
+        IERC20(tokenIn).approve(address(router), type(uint256).max);
+        vm.stopPrank();
 
-    //     // call the hookmate router
-    //     vm.prank(owner);
-    //     BalanceDelta delta = router.swapExactTokensForTokens(
-    //         amountIn,
-    //         0,                 // amountOutMin: set a real value for slippage control
-    //         zeroForOne,
-    //         poolKey,
-    //         "",
-    //         owner,
-    //         block.timestamp + 60
-    //     );
+        // call the hookmate router
+        vm.prank(owner);
+        BalanceDelta delta = router.swapExactTokensForTokens(
+            amountIn,
+            0,                 // amountOutMin: set a real value for slippage control
+            zeroForOne,
+            poolKey,
+            "",
+            owner,
+            block.timestamp + 60
+        );
 
-    //     uint256 amountOut = zeroForOne
-    //         ? uint256(int256(-delta.amount1()))
-    //         : uint256(int256(-delta.amount0()));
+        uint256 amountOut = zeroForOne
+            ? uint256(int256(-delta.amount1()))
+            : uint256(int256(-delta.amount0()));
 
-    //     console2.log("amountOut:", amountOut);
-    // }
+        console2.log("amountOut:", amountOut);
+    }
     
-    /////////////////////////////////////
-    // --- Arbitrage Tests (Add Your Logic) ---
-    /////////////////////////////////////
+    ///////////////////////////////////
+    //--- Arbitrage Tests (Add Your Logic) ---//
+    ///////////////////////////////////
 
-    // function test_SwapThenDetectArb() public {
-    //     // 1) Read pre-swap price
-    //     (uint160 preSqrt,,,) = poolManager.getSlot0(poolKey.toId());
-    //     console2.log(preSqrt);
-    //     uint256 preP = _price1per0_1e18(preSqrt, 6, 6);
-    //     console2.log("pre:", preP);
+    function test_SwapThenDetectArb() public {
+        // 1) Read pre-swap price
+        (uint160 preSqrt,,,) = poolManager.getSlot0(poolKey.toId());
+        console2.log(preSqrt);
+        uint256 preP = _price1per0_1e18(preSqrt, 6, 6);
+        console2.log("pre:", preP);
 
-    //     // 2) Do a swap that moves price
-    //     bool zeroForOne = true;
-    //     address owner = vm.envAddress("WALLET_ADDRESS");
-    //     address tokenIn = Currency.unwrap(zeroForOne ? poolKey.currency0 : poolKey.currency1);
-    //     vm.startPrank(owner);
-    //     IERC20(tokenIn).approve(address(router), type(uint256).max);
-    //     router.swapExactTokensForTokens(
-    //         100e6,  // amountIn
-    //         0,      // min out (dev only)
-    //         zeroForOne,
-    //         poolKey,
-    //         "",
-    //         owner,
-    //         block.timestamp + 60
-    //     );
-    //     vm.stopPrank();
+        // 2) Do a swap that moves price
+        bool zeroForOne = true;
+        address owner = vm.envAddress("WALLET_ADDRESS");
+        address tokenIn = Currency.unwrap(zeroForOne ? poolKey.currency0 : poolKey.currency1);
+        vm.startPrank(owner);
+        IERC20(tokenIn).approve(address(router), type(uint256).max);
+        router.swapExactTokensForTokens(
+            100e6,  // amountIn
+            0,      // min out (dev only)
+            zeroForOne,
+            poolKey,
+            "",
+            owner,
+            block.timestamp + 60
+        );
+        vm.stopPrank();
 
-    //     // 3) Read post-swap price (same test -> persists)
-    //     (uint160 postSqrt,,,) = poolManager.getSlot0(poolKey.toId());
-    //     uint256 postP = _price1per0_1e18(postSqrt, 6, 18);
-    //     console2.log("post:", postP);
+        // 3) Read post-swap price (same test -> persists)
+        (uint160 postSqrt,,,) = poolManager.getSlot0(poolKey.toId());
+        uint256 postP = _price1per0_1e18(postSqrt, 6, 18);
+        console2.log("post:", postP);
 
-    //     assertTrue(postP != preP, "price didn't move");
-    // }
+        assertTrue(postP != preP, "price didn't move");
+    }
 
 
     function test_executor() public {
@@ -357,16 +360,9 @@ contract ArbExecutorTest is Test {
         address owner = vm.envAddress("WALLET_ADDRESS");
         vm.startPrank(owner);
         uint256 deadline =  block.timestamp + 3000;
-        
-        // // In your test, right before calling arb function:
-        // address router = address(executor.router());
-        // uint256 codeSize;
-        // assembly { codeSize := extcodesize(router) }
-        // console2.log("router codeSize", codeSize);
-        // require(codeSize > 0, "router has no code");
-        // //uint256 balToken0 = IERC20(a0).balanceOf(deployer);
+    
 
-        bytes32 EXPECTED_PID = 0x76f6ed08568f0280e481346a4da5335d7b44accbf43818c0facf20ca936d9211;
+        bytes32 EXPECTED_PID = 0x3ec5f6e4f673e4d4afcd6b73428f4b06594ee62bc9b9a3dbba4f9fc1d2a06af4;
         // Build the v4-core PoolKey from the executor’s public tuple getter
         (Currency c0, Currency c1, uint24 fee, int24 ts, IHooks hooksAddr) = executor.poolKey();
 
@@ -394,17 +390,8 @@ contract ArbExecutorTest is Test {
         console2.log("slot0.sqrtPriceX96", sqrtPriceX96);
         console2.log("slot0.tick",        tick);
         require(sqrtPriceX96 != 0, "pool not initialized (sqrtPriceX96=0)");
-
-        // // ---- Read liquidity (first value is total L) ----
-        // (uint128 L, , , ) = StateLibrary.getLiquidity(poolManager, pid);
-        // console2.log("pool liquidity (L)", L);
-        // require(L > 0, "no liquidity in pool");
-
-
-        // PoolSwapTest poolSwap = new PoolSwapTest(poolManager);
-        // executor.setRouter(address(poolSwap));
     
-        executor.arbMintThenSell(1e7, 1e7, 0, deadline);
+        executor.arbMintThenSell(10e7, 10e7, 0, deadline);
 
 
         // function arbMintThenSell(
@@ -416,243 +403,243 @@ contract ArbExecutorTest is Test {
     }
 
 
-    // function test_ArbOpportunity() public {
-    //     // Grab decimals dynamically
-    //     address a0 = Currency.unwrap(poolKey.currency0);
-    //     address a1 = Currency.unwrap(poolKey.currency1);
-    //     uint8 dec0 = _decimals(a0);
-    //     uint8 dec1 = _decimals(a1);
+    function test_ArbOpportunity() public {
+        // Grab decimals dynamically
+        address a0 = Currency.unwrap(poolKey.currency0);
+        address a1 = Currency.unwrap(poolKey.currency1);
+        uint8 dec0 = _decimals(a0);
+        uint8 dec1 = _decimals(a1);
 
-    //     _logPortfolio(deployer, "before");
+        _logPortfolio(deployer, "before");
 
-    //     // 1) Spot price (token1 per token0, 1e18-scaled)
-    //     (uint160 sqrtP,,,) = poolManager.getSlot0(poolKey.toId());
-    //     require(sqrtP != 0, "pool not initialized");
-    //     uint256 priceLPe18 = _price1per0_1e18(sqrtP, dec0, dec1); // LP: token1 per token0 (1e18)
-    //     uint256 invPriceLPe18 = (1e36) / priceLPe18; // LP: token0 per token1 (1e18)
-    //     console2.log("LP price (token1/token0, 1e18):", priceLPe18);
-    //     console2.log("LP price (token0/token1, 1e18):", invPriceLPe18);
+        // 1) Spot price (token1 per token0, 1e18-scaled)
+        (uint160 sqrtP,,,) = poolManager.getSlot0(poolKey.toId());
+        require(sqrtP != 0, "pool not initialized");
+        uint256 priceLPe18 = _price1per0_1e18(sqrtP, dec0, dec1); // LP: token1 per token0 (1e18)
+        uint256 invPriceLPe18 = (1e36) / priceLPe18; // LP: token0 per token1 (1e18)
+        console2.log("LP price (token1/token0, 1e18):", priceLPe18);
+        console2.log("LP price (token0/token1, 1e18):", invPriceLPe18);
 
-    //     // 2) Reference & threshold
-    //     //uint256 priceNAVe18 = vm.envOr("PRICE_NAV_e18", uint256(105e16)); // 0.105 * 1e18
-    //     uint256 priceNAVe18 = vm.envOr("PRICE_NAV_e18", uint256(95e16)); // 0.95 * 1e18
-    //     uint256 threshBps   = vm.envOr("THRESHOLD_BPS", uint256(50));    // 0.50%
-    //     uint256 diff   = priceLPe18 > priceNAVe18 ? priceLPe18 - priceNAVe18 : priceNAVe18 - priceLPe18;
-    //     uint256 devBps = (diff * 10_000) / priceNAVe18;
-    //     console2.log("LP:", priceLPe18, "NAV:", priceNAVe18);
-    //     console2.log("dev(bps):", devBps);
-    //     if (devBps < threshBps) return;
+        // 2) Reference & threshold
+        //uint256 priceNAVe18 = vm.envOr("PRICE_NAV_e18", uint256(105e16)); // 0.105 * 1e18
+        uint256 priceNAVe18 = vm.envOr("PRICE_NAV_e18", uint256(95e16)); // 0.95 * 1e18
+        uint256 threshBps   = vm.envOr("THRESHOLD_BPS", uint256(50));    // 0.50%
+        uint256 diff   = priceLPe18 > priceNAVe18 ? priceLPe18 - priceNAVe18 : priceNAVe18 - priceLPe18;
+        uint256 devBps = (diff * 10_000) / priceNAVe18;
+        console2.log("LP:", priceLPe18, "NAV:", priceNAVe18);
+        console2.log("dev(bps):", devBps);
+        if (devBps < threshBps) return;
 
-    //     // 3) Direction
-    //     // P_lp = token1/token0 (1e18-scaled), P_nav likewise.
-    //     // Buy t1 on LP when P_lp > P_nav (since C_lp < C_nav), else sell t1 on LP.
-    //     bool zeroForOne = (priceLPe18 > priceNAVe18); // true => token0->token1 on LP; // buy token1 if LP < NAV
+        // 3) Direction
+        // P_lp = token1/token0 (1e18-scaled), P_nav likewise.
+        // Buy t1 on LP when P_lp > P_nav (since C_lp < C_nav), else sell t1 on LP.
+        bool zeroForOne = (priceLPe18 > priceNAVe18); // true => token0->token1 on LP; // buy token1 if LP < NAV
 
-    //     // 4) Approve input token (scale amountIn by dec0/dec1)
-    //     uint256 amountIn = 10 * (10 ** uint256(zeroForOne ? dec0 : dec1)); // "10 units" of input token
-    //     address tokenInAddr = zeroForOne ? a0 : a1;
-    //     IERC20 tokenIn = IERC20(tokenInAddr);
-    //     vm.startPrank(deployer);
-    //     tokenIn.approve(address(swapRouter), type(uint256).max);
-    //     vm.stopPrank();
+        // 4) Approve input token (scale amountIn by dec0/dec1)
+        uint256 amountIn = 10 * (10 ** uint256(zeroForOne ? dec0 : dec1)); // "10 units" of input token
+        address tokenInAddr = zeroForOne ? a0 : a1;
+        IERC20 tokenIn = IERC20(tokenInAddr);
+        vm.startPrank(deployer);
+        tokenIn.approve(address(swapRouter), type(uint256).max);
+        vm.stopPrank();
 
-    //     // 5) Balances user before
-    //     uint256 b0Before = IERC20(a0).balanceOf(deployer);
-    //     uint256 b1Before = IERC20(a1).balanceOf(deployer);
+        // 5) Balances user before
+        uint256 b0Before = IERC20(a0).balanceOf(deployer);
+        uint256 b1Before = IERC20(a1).balanceOf(deployer);
 
-    //     // 6) Swap
-    //     uint160 priceLimit = _noLimit(zeroForOne);
-    //     SwapParams memory params = SwapParams({
-    //         zeroForOne: zeroForOne,
-    //         amountSpecified: int256(amountIn),
-    //         sqrtPriceLimitX96: priceLimit
-    //     });
-    //     PoolSwapTest.TestSettings memory settings = PoolSwapTest.TestSettings({
-    //         takeClaims: false,
-    //         settleUsingBurn: false
-    //     });
-    //     vm.startPrank(deployer);
-    //     swapRouter.swap(poolKey, params, settings, "");
-    //     vm.stopPrank();
+        // 6) Swap
+        uint160 priceLimit = _noLimit(zeroForOne);
+        SwapParams memory params = SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: int256(amountIn),
+            sqrtPriceLimitX96: priceLimit
+        });
+        PoolSwapTest.TestSettings memory settings = PoolSwapTest.TestSettings({
+            takeClaims: false,
+            settleUsingBurn: false
+        });
+        vm.startPrank(deployer);
+        swapRouter.swap(poolKey, params, settings, "");
+        vm.stopPrank();
 
-    //     // 7) Balances user after swap
-    //     uint256 b0After = IERC20(a0).balanceOf(deployer);
-    //     uint256 b1After = IERC20(a1).balanceOf(deployer);
+        // 7) Balances user after swap
+        uint256 b0After = IERC20(a0).balanceOf(deployer);
+        uint256 b1After = IERC20(a1).balanceOf(deployer);
 
-    //     int256 d0 = int256(b0After) - int256(b0Before);  // token0 delta (dec0)
-    //     int256 d1 = int256(b1After) - int256(b1Before);  // token1 delta (dec1)
-    //     console2.log("token0:", d0);
-    //     console2.log("token1:", d1);
+        int256 d0 = int256(b0After) - int256(b0Before);  // token0 delta (dec0)
+        int256 d1 = int256(b1After) - int256(b1Before);  // token1 delta (dec1)
+        console2.log("token0:", d0);
+        console2.log("token1:", d1);
 
-    //     // 8) PnL in token0 units, 1e18-scaled
-    //     // token0 per token1 (1e18) = 1e36 / priceNAVe18  (since NAV is token1/token0 in 1e18)
-    //     uint256 token0PerToken1_1e18 = (1e36) / priceNAVe18;
+        // 8) PnL in token0 units, 1e18-scaled
+        // token0 per token1 (1e18) = 1e36 / priceNAVe18  (since NAV is token1/token0 in 1e18)
+        uint256 token0PerToken1_1e18 = (1e36) / priceNAVe18;
 
-    //     // d0_value = d0 * 1e18 / 10^dec0
-    //     int256 d0_value_1e18 = (d0 * int256(1e18)) / int256(10 ** uint256(dec0));
-    //     // d1_value = d1 * (token0PerToken1_1e18) / 10^dec1
-    //     int256 d1_value_1e18 = (d1 * int256(token0PerToken1_1e18)) / int256(10 ** uint256(dec1));
+        // d0_value = d0 * 1e18 / 10^dec0
+        int256 d0_value_1e18 = (d0 * int256(1e18)) / int256(10 ** uint256(dec0));
+        // d1_value = d1 * (token0PerToken1_1e18) / 10^dec1
+        int256 d1_value_1e18 = (d1 * int256(token0PerToken1_1e18)) / int256(10 ** uint256(dec1));
 
-    //     // cycle PnL in token0 units (1e18-scaled)
-    //     int256 pnlCycle_1e18 = _pnlCycle(zeroForOne, d0, d1, dec0, dec1, priceNAVe18);
-    //     console2.log("Cycle PnL (token0, 1e18):", pnlCycle_1e18);
-    //     console2.log("Cycle PnL (token0, human):", pnlCycle_1e18 / int256(1e18));
-    //     assertTrue(pnlCycle_1e18 > 0, "Two-leg arb not profitable at this size");
+        // cycle PnL in token0 units (1e18-scaled)
+        int256 pnlCycle_1e18 = _pnlCycle(zeroForOne, d0, d1, dec0, dec1, priceNAVe18);
+        console2.log("Cycle PnL (token0, 1e18):", pnlCycle_1e18);
+        console2.log("Cycle PnL (token0, human):", pnlCycle_1e18 / int256(1e18));
+        assertTrue(pnlCycle_1e18 > 0, "Two-leg arb not profitable at this size");
 
-    //     // If LP < NAV we bought token1 on LP → mint shares with token1
-    //     if (zeroForOne) {
-    //         uint256 t1Bal = IERC20(a1).balanceOf(deployer);
-    //         uint256 toDeposit = _min(t1Bal, 10 * (10 ** uint256(dec1))); // deposit up to 10 token1 units
-    //         if (toDeposit > 0) {
-    //             address assetAddr = vault.asset();
-    //             uint8 decAsset = _decimals(assetAddr);
+        // If LP < NAV we bought token1 on LP → mint shares with token1
+        if (zeroForOne) {
+            uint256 t1Bal = IERC20(a1).balanceOf(deployer);
+            uint256 toDeposit = _min(t1Bal, 10 * (10 ** uint256(dec1))); // deposit up to 10 token1 units
+            if (toDeposit > 0) {
+                address assetAddr = vault.asset();
+                uint8 decAsset = _decimals(assetAddr);
 
-    //             vm.startPrank(deployer);
-    //             IERC20(assetAddr).approve(address(vault), type(uint256).max);
-    //             console2.log("allowance->vault:", IERC20(assetAddr).allowance(deployer, address(vault)));
-    //             uint256 shares = vault.deposit(toDeposit, deployer);
-    //             vm.stopPrank();
-    //             console2.log("Vault minted shares:", shares);
-    //         }
-    //     } else {
-    //         // LP > NAV we sold token1 on LP → redeem some existing shares for token1
-    //         uint256 shareBal = IERC20(address(vault)).balanceOf(deployer);
-    //         uint256 toRedeem = shareBal / 10; // redeem 10% of shares (example sizing)
-    //         if (toRedeem > 0) {
-    //             vm.prank(deployer);
-    //             uint256 assetsOut = vault.redeem(toRedeem, deployer, deployer);
-    //             console2.log("Vault redeemed assets (token1):", assetsOut);
-    //         }
-    //     }
-    //     // Balances user after swap
-    //     uint256 b0AfterDef = IERC20(a0).balanceOf(deployer);
-    //     uint256 b1AfterDef = IERC20(a1).balanceOf(deployer);
-    //     console2.log("b0AfterDef:", b0AfterDef);
-    //     console2.log("b1AfterDef:", b1AfterDef);
+                vm.startPrank(deployer);
+                IERC20(assetAddr).approve(address(vault), type(uint256).max);
+                console2.log("allowance->vault:", IERC20(assetAddr).allowance(deployer, address(vault)));
+                uint256 shares = vault.deposit(toDeposit, deployer);
+                vm.stopPrank();
+                console2.log("Vault minted shares:", shares);
+            }
+        } else {
+            // LP > NAV we sold token1 on LP → redeem some existing shares for token1
+            uint256 shareBal = IERC20(address(vault)).balanceOf(deployer);
+            uint256 toRedeem = shareBal / 10; // redeem 10% of shares (example sizing)
+            if (toRedeem > 0) {
+                vm.prank(deployer);
+                uint256 assetsOut = vault.redeem(toRedeem, deployer, deployer);
+                console2.log("Vault redeemed assets (token1):", assetsOut);
+            }
+        }
+        // Balances user after swap
+        uint256 b0AfterDef = IERC20(a0).balanceOf(deployer);
+        uint256 b1AfterDef = IERC20(a1).balanceOf(deployer);
+        console2.log("b0AfterDef:", b0AfterDef);
+        console2.log("b1AfterDef:", b1AfterDef);
 
-    //      _logPortfolio(deployer, "after");
+         _logPortfolio(deployer, "after");
 
-    // }
+    }
 
-    // // --- helpers: price math (token1 per token0, 1e18-scaled) ---
-    // function _decimals(address token) internal view returns (uint8 d) {
-    //     // Many mocks implement IERC20Metadata; default to 18 if not
-    //     try IERC20Metadata(token).decimals() returns (uint8 got) { d = got; }
-    //     catch { d = 18; }
-    //}
+    // --- helpers: price math (token1 per token0, 1e18-scaled) ---
+    function _decimals(address token) internal view returns (uint8 d) {
+        // Many mocks implement IERC20Metadata; default to 18 if not
+        try IERC20Metadata(token).decimals() returns (uint8 got) { d = got; }
+        catch { d = 18; }
+    }
 
     
-    // // === NEW: one-shot portfolio logger (LP price, NAV, balances, totals) ===
-    // function _logPortfolio(address owner, string memory tag) internal view {
-    //     address a0 = Currency.unwrap(poolKey.currency0);
-    //     address a1 = Currency.unwrap(poolKey.currency1);
-    //     uint8 dec0 = _decimals(a0);
-    //     uint8 dec1 = _decimals(a1);
+    // === NEW: one-shot portfolio logger (LP price, NAV, balances, totals) ===
+    function _logPortfolio(address owner, string memory tag) internal view {
+        address a0 = Currency.unwrap(poolKey.currency0);
+        address a1 = Currency.unwrap(poolKey.currency1);
+        uint8 dec0 = _decimals(a0);
+        uint8 dec1 = _decimals(a1);
 
-    //     // LP price (t1 per t0, 1e18)
-    //     (uint160 sqrtP,,,) = poolManager.getSlot0(poolKey.toId());
-    //     uint256 t1PerT0_1e18 = _price1per0_1e18(sqrtP, dec0, dec1);
-    //     uint256 t0PerT1_1e18 = (t1PerT0_1e18 == 0) ? 0 : (1e36 / t1PerT0_1e18);
+        // LP price (t1 per t0, 1e18)
+        (uint160 sqrtP,,,) = poolManager.getSlot0(poolKey.toId());
+        uint256 t1PerT0_1e18 = _price1per0_1e18(sqrtP, dec0, dec1);
+        uint256 t0PerT1_1e18 = (t1PerT0_1e18 == 0) ? 0 : (1e36 / t1PerT0_1e18);
 
-    //     // Vault NAV (ERC4626)
-    //     address assetAddr = vault.asset();
-    //     uint8 decAsset = _decimals(assetAddr);
-    //     uint8 decShare = _decimals(address(vault));
-    //     uint256 assets = vault.totalAssets();
-    //     uint256 shares = vault.totalSupply();
-    //     uint256 nav_assetPerShare_1e18 = (shares == 0)
-    //         ? 0
-    //         : FullMath.mulDiv(assets, 10**(18 + decShare), shares * 10**decAsset);
-    //     uint256 nav_sharePerAsset_1e18 = (assets == 0)
-    //         ? 0
-    //         : FullMath.mulDiv(shares, 10**(18 + decAsset), assets * 10**decShare);
+        // Vault NAV (ERC4626)
+        address assetAddr = vault.asset();
+        uint8 decAsset = _decimals(assetAddr);
+        uint8 decShare = _decimals(address(vault));
+        uint256 assets = vault.totalAssets();
+        uint256 shares = vault.totalSupply();
+        uint256 nav_assetPerShare_1e18 = (shares == 0)
+            ? 0
+            : FullMath.mulDiv(assets, 10**(18 + decShare), shares * 10**decAsset);
+        uint256 nav_sharePerAsset_1e18 = (assets == 0)
+            ? 0
+            : FullMath.mulDiv(shares, 10**(18 + decAsset), assets * 10**decShare);
 
-    //     // Balances
-    //     uint256 b0 = IERC20(a0).balanceOf(owner);
-    //     uint256 b1 = IERC20(a1).balanceOf(owner);
-    //     uint256 s  = IERC20(address(vault)).balanceOf(owner);
-    //     uint256 assetsFromShares = vault.convertToAssets(s);
+        // Balances
+        uint256 b0 = IERC20(a0).balanceOf(owner);
+        uint256 b1 = IERC20(a1).balanceOf(owner);
+        uint256 s  = IERC20(address(vault)).balanceOf(owner);
+        uint256 assetsFromShares = vault.convertToAssets(s);
 
-    //     // Totals valued in token0 / token1 (1e18)
-    //     int256 totT0_1e18 =
-    //         int256(FullMath.mulDiv(b0, 1e18, 10**dec0)) +
-    //         int256(FullMath.mulDiv(b1, t0PerT1_1e18, 10**dec1)) +
-    //         int256(FullMath.mulDiv(assetsFromShares, (assetAddr == a1 ? t0PerT1_1e18 : 1e18), 10**decAsset));
+        // Totals valued in token0 / token1 (1e18)
+        int256 totT0_1e18 =
+            int256(FullMath.mulDiv(b0, 1e18, 10**dec0)) +
+            int256(FullMath.mulDiv(b1, t0PerT1_1e18, 10**dec1)) +
+            int256(FullMath.mulDiv(assetsFromShares, (assetAddr == a1 ? t0PerT1_1e18 : 1e18), 10**decAsset));
 
-    //     int256 totT1_1e18 =
-    //         int256(FullMath.mulDiv(b1, 1e18, 10**dec1)) +
-    //         int256(FullMath.mulDiv(b0, t1PerT0_1e18, 10**dec0)) +
-    //         int256(FullMath.mulDiv(assetsFromShares, (assetAddr == a0 ? t1PerT0_1e18 : 1e18), 10**decAsset));
+        int256 totT1_1e18 =
+            int256(FullMath.mulDiv(b1, 1e18, 10**dec1)) +
+            int256(FullMath.mulDiv(b0, t1PerT0_1e18, 10**dec0)) +
+            int256(FullMath.mulDiv(assetsFromShares, (assetAddr == a0 ? t1PerT0_1e18 : 1e18), 10**decAsset));
 
-    //     // Logs
-    //     console2.log(string.concat("== Portfolio (", tag, ") =="));
-    //     console2.log("LP t1/t0 (1e18):", t1PerT0_1e18);
-    //     console2.log("LP t0/t1 (1e18):", t0PerT1_1e18);
-    //     console2.log("NAV asset/share (t0 per t1, 1e18):", nav_assetPerShare_1e18);
-    //     console2.log("NAV share/asset (t1 per t0, 1e18):", nav_sharePerAsset_1e18);
-    //     console2.log("token0:", b0);
-    //     console2.log("shares:", s);
-    //     console2.log("assets:", assetsFromShares);
-    //     console2.log("Total (token0, 1e18):", totT0_1e18); 
-    //     console2.log("human:", totT0_1e18 / int256(1e18));
-    //     console2.log("Total (token1, 1e18):", totT1_1e18); 
-    //     console2.log("human:", totT1_1e18 / int256(1e18));
-    // }
+        // Logs
+        console2.log(string.concat("== Portfolio (", tag, ") =="));
+        console2.log("LP t1/t0 (1e18):", t1PerT0_1e18);
+        console2.log("LP t0/t1 (1e18):", t0PerT1_1e18);
+        console2.log("NAV asset/share (t0 per t1, 1e18):", nav_assetPerShare_1e18);
+        console2.log("NAV share/asset (t1 per t0, 1e18):", nav_sharePerAsset_1e18);
+        console2.log("token0:", b0);
+        console2.log("shares:", s);
+        console2.log("assets:", assetsFromShares);
+        console2.log("Total (token0, 1e18):", totT0_1e18); 
+        console2.log("human:", totT0_1e18 / int256(1e18));
+        console2.log("Total (token1, 1e18):", totT1_1e18); 
+        console2.log("human:", totT1_1e18 / int256(1e18));
+    }
 
 
-    // function _pnlCycle(
-    // bool zeroForOne,
-    // int256 d0, int256 d1,
-    // uint8 dec0, uint8 dec1,
-    // uint256 priceNAVe18
-    // ) internal pure returns (int256 pnl_1e18) {
-    //     if (zeroForOne) {
-    //         // LP < NAV: bought token1 with token0 on LP
-    //         // Second leg (redeem at NAV): token0_from_vault = d1 * (token0 per token1)
-    //         // token0 per token1 (1e18) = 1e36 / priceNAVe18
-    //         uint256 token0PerToken1_1e18 = (1e36) / priceNAVe18;
+    function _pnlCycle(
+    bool zeroForOne,
+    int256 d0, int256 d1,
+    uint8 dec0, uint8 dec1,
+    uint256 priceNAVe18
+    ) internal pure returns (int256 pnl_1e18) {
+        if (zeroForOne) {
+            // LP < NAV: bought token1 with token0 on LP
+            // Second leg (redeem at NAV): token0_from_vault = d1 * (token0 per token1)
+            // token0 per token1 (1e18) = 1e36 / priceNAVe18
+            uint256 token0PerToken1_1e18 = (1e36) / priceNAVe18;
 
-    //         // Scale d0,d1 to 1e18
-    //         int256 d0_1e18 = (d0 * int256(1e18)) / int256(10 ** uint256(dec0));
-    //         int256 d1_0_1e18 = (d1 * int256(token0PerToken1_1e18)) / int256(10 ** uint256(dec1));
+            // Scale d0,d1 to 1e18
+            int256 d0_1e18 = (d0 * int256(1e18)) / int256(10 ** uint256(dec0));
+            int256 d1_0_1e18 = (d1 * int256(token0PerToken1_1e18)) / int256(10 ** uint256(dec1));
 
-    //         // Net cycle PnL in token0 units (1e18-scale)
-    //         pnl_1e18 = d0_1e18 + d1_0_1e18;
-    //     } else {
-    //         // LP > NAV: sold token1 for token0 on LP
-    //         // Second leg (mint at NAV): token1_from_vault = d0 * (token1 per token0)
-    //         // token1 per token0 (1e18) = priceNAVe18
-    //         int256 token1_from_vault = (d0 * int256(priceNAVe18)) / int256(10 ** uint256(dec0)); // 1e18 scale
+            // Net cycle PnL in token0 units (1e18-scale)
+            pnl_1e18 = d0_1e18 + d1_0_1e18;
+        } else {
+            // LP > NAV: sold token1 for token0 on LP
+            // Second leg (mint at NAV): token1_from_vault = d0 * (token1 per token0)
+            // token1 per token0 (1e18) = priceNAVe18
+            int256 token1_from_vault = (d0 * int256(priceNAVe18)) / int256(10 ** uint256(dec0)); // 1e18 scale
 
-    //         // Scale d1 to 1e18
-    //         int256 d1_1e18 = (d1 * int256(1e18)) / int256(10 ** uint256(dec1));
+            // Scale d1 to 1e18
+            int256 d1_1e18 = (d1 * int256(1e18)) / int256(10 ** uint256(dec1));
 
-    //         // Net cycle PnL in token1 units (1e18-scale). Convert to token0 units for comparison:
-    //         // token0 per token1 (1e18) = 1e36 / priceNAVe18
-    //         int256 pnl_token1_1e18 = d1_1e18 + token1_from_vault;
-    //         pnl_1e18 = (pnl_token1_1e18 * int256((1e36) / priceNAVe18)) / int256(1e18);
-    //     }
-    // }
+            // Net cycle PnL in token1 units (1e18-scale). Convert to token0 units for comparison:
+            // token0 per token1 (1e18) = 1e36 / priceNAVe18
+            int256 pnl_token1_1e18 = d1_1e18 + token1_from_vault;
+            pnl_1e18 = (pnl_token1_1e18 * int256((1e36) / priceNAVe18)) / int256(1e18);
+        }
+    }
 
-    // /// token1 per token0, scaled to 1e18
-    // function _price1per0_1e18(uint160 sqrtPriceX96, uint8 dec0, uint8 dec1)
-    //     internal pure returns (uint256)
-    // {
-    //     // ratioX96 = price * 2^96  (no precision loss for price < 1)
-    //     uint256 ratioX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
-    //     // (ratioX96 * 10^dec1 * 1e18) / (2^96 * 10^dec0)
-    //     return FullMath.mulDiv(ratioX96, (10 ** dec1) * 1e18, (1 << 96) * (10 ** dec0));
-    // }
+    /// token1 per token0, scaled to 1e18
+    function _price1per0_1e18(uint160 sqrtPriceX96, uint8 dec0, uint8 dec1)
+        internal pure returns (uint256)
+    {
+        // ratioX96 = price * 2^96  (no precision loss for price < 1)
+        uint256 ratioX96 = FullMath.mulDiv(uint256(sqrtPriceX96), uint256(sqrtPriceX96), 1 << 96);
+        // (ratioX96 * 10^dec1 * 1e18) / (2^96 * 10^dec0)
+        return FullMath.mulDiv(ratioX96, (10 ** dec1) * 1e18, (1 << 96) * (10 ** dec0));
+    }
 
-    // function _noLimit(bool zeroForOne) internal pure returns (uint160) {
-    //     return zeroForOne
-    //         ? TickMath.getSqrtPriceAtTick(TickMath.MIN_TICK + 1)
-    //         : TickMath.getSqrtPriceAtTick(TickMath.MAX_TICK - 1);
-    // }
+    function _noLimit(bool zeroForOne) internal pure returns (uint160) {
+        return zeroForOne
+            ? TickMath.getSqrtPriceAtTick(TickMath.MIN_TICK + 1)
+            : TickMath.getSqrtPriceAtTick(TickMath.MAX_TICK - 1);
+    }
 
-    // function _min(uint256 a, uint256 b) internal pure returns (uint256) {
-    //     return a < b ? a : b;
-    // }
+    function _min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a < b ? a : b;
+    }
 
 
 

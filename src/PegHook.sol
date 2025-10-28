@@ -59,8 +59,8 @@ contract PegHook is BaseHook {
  
 
     // Your two token addresses (unsorted)
-    address public constant A = 0x288D991A64Ed02171d0beC0DC788ad76421e1169;
-    address public constant B = 0xaD60cee051579E1143e3DC425573f57Ac05A1315;
+    address public constant A = 0xEa812481b0bd91417AE75687eEEA13FEE1B23Cf8;
+    address public constant B = 0x41de4987ba19D073383c99EB3068B3e29A5C710e;
     //address public constant A = 0xb32Da9C3d9d0bD24b647af261818739AE303648d;
     //address public constant B = 0x69eCF8893845A267102f3b489A515dA697F7049e;
     //address public constant A = 0x26a0379254f298B5d7aB19828F48B5651FA10188;

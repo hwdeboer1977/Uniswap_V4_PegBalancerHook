@@ -26,8 +26,8 @@ contract BaseScript is Script {
     /////////////////////////////////////
 
     // USDC on Sepolia Arbitrum Fork
-    IERC20 internal constant token0 = IERC20(0x288D991A64Ed02171d0beC0DC788ad76421e1169);
-    IERC20 internal constant token1 = IERC20(0xaD60cee051579E1143e3DC425573f57Ac05A1315);
+    IERC20 internal constant token0 = IERC20(0xEa812481b0bd91417AE75687eEEA13FEE1B23Cf8);
+    IERC20 internal constant token1 = IERC20(0x41de4987ba19D073383c99EB3068B3e29A5C710e);
     
     // USDC on Sepolia Arbitrum
     //IERC20 internal constant token0 = IERC20(0xb32Da9C3d9d0bD24b647af261818739AE303648d);
@@ -38,7 +38,7 @@ contract BaseScript is Script {
     //IERC20 internal constant token1 = IERC20(0x6FC20bE23a51Db17e3ecad4cd48F7b91833fff88);
     
     //IHooks constant hookContract = IHooks(address(0));
-    IHooks constant hookContract = IHooks(0x136846383BC5a42Bc7e31470FEe31EaaE33EA080);
+    IHooks constant hookContract = IHooks(0xf7D8f9B115a5568a6F55f43BB6eFd81717F0A080);
 
     // load from .env (Foundry auto-loads .env in repo root)
     // HOOK_ADDR=0x... in your .env

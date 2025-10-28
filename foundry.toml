@@ -10,5 +10,8 @@ via_ir = false
 bytecode_hash = "none"
 cbor_metadata = false
 
+[rpc_endpoints] 
+arbitrum_sepolia = "https://arb-sepolia.g.alchemy.com/v2/eoDKFwWxqATc20dM_7bj2ZOuUD8bsHtk"
+
 [lint]
 exclude_lints = ["screaming-snake-case-immutable", "screaming-snake-case-const"]
