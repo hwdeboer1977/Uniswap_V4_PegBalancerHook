@@ -33,6 +33,7 @@ interface IERC20 {
     function allowance(address owner, address spender) external view returns (uint256);
 }
 
+// ERC4646 vault by OpenZeppelin
 interface IERC4626 {
     function asset() external view returns (address);
     function totalAssets() external view returns (uint256);
@@ -56,7 +57,7 @@ interface IAsyncVault is IERC4626 {
     function unlockedSharesOf(address account) external view returns (uint256);
 }
 
-// Matches your TestSwapRouter used in scripts
+// Matches our TestSwapRouter used in scripts
 interface ITestSwapRouter {
     /// @notice Swap exact input tokens for output tokens
     /// @param amountIn Exact amount of input tokens to swap
@@ -82,16 +83,16 @@ contract ArbExecutor {
     // --------
     // Errors
     // --------
-    error NotOwner();
-    error Paused();
-    error Deadline();
-    error BadConfig();
-    error MinOut();
-    error NoProfit();
-    error PoolKeyMismatch();
-    error RequestNotFound();
-    error NotRequestOwner();
-    error WithdrawalNotUnlocked();
+    error NotOwner();             // caller is not owner
+    error Paused();               // contract paused
+    error Deadline();             // past deadline
+    error BadConfig();            // zero addresses or invalid params
+    error MinOut();               // slippage/amountOut checks failed
+    error NoProfit();             // PnL <= 0
+    error PoolKeyMismatch();      // provided key doesn't match BASE/Y pair
+    error RequestNotFound();      // no pending withdrawal
+    error NotRequestOwner();      // reserved for per-user flows (not used here)
+    error WithdrawalNotUnlocked();// pending withdrawal not yet unlocked
 
     // --------
     // Events
@@ -116,11 +117,11 @@ contract ArbExecutor {
 
     PoolKey private _poolKey;            // always stored in canonical order
     
-    address public owner;
-    bool    public paused;
+    address public owner;                // admin address
+    bool    public paused;               // global pause
 
     // simple nonReentrancy
-    uint256 private _locked;
+    uint256 private _locked;             // 0 = unlocked, 1 = locked
 
     // --------
     // Modifiers
@@ -149,6 +150,7 @@ contract ArbExecutor {
         (c0, c1) = a < b ? (a, b) : (b, a);
     }
 
+    // Create a PoolKey for Uniswap v4 with the two token addresses sorted (token0 < token1 by address) so the key is canonical/consistent.
     function _buildCanonicalPoolKey(
         address a,
         address b,
@@ -166,6 +168,7 @@ contract ArbExecutor {
         });
     }
 
+    // Check that the given PoolKey actually corresponds to the pair our arb bot expects: BASE and Y_TOKEN—in either order.
     function _poolContainsBaseAndY(PoolKey memory k) internal view returns (bool) {
         address c0 = Currency.unwrap(k.currency0);
         address c1 = Currency.unwrap(k.currency1);
@@ -186,6 +189,7 @@ contract ArbExecutor {
         int24   _tickSpacing,
         IHooks  _hooks
     ) {
+        // Basic config checks (no zero addresses)
         if (_base == address(0) || _yToken == address(0) || _vault == address(0) || _router == address(0)) revert BadConfig();
 
         owner  = msg.sender;
@@ -194,6 +198,7 @@ contract ArbExecutor {
         VAULT  = IAsyncVault(_vault);
         router = ITestSwapRouter(_router);
 
+        // Build and store canonical PoolKey
         _poolKey = _buildCanonicalPoolKey(_base, _yToken, _fee, _tickSpacing, _hooks);
         if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();
 
@@ -215,6 +220,7 @@ contract ArbExecutor {
     }
 
     function setRouter(address r) external onlyOwner {
+        // Update router and refresh approvals to the new spender
         if (r == address(0)) revert BadConfig();
         router = ITestSwapRouter(r);
         // re-approve in case router changed
@@ -264,7 +270,7 @@ contract ArbExecutor {
     // -----------------------
     // Views (introspection)
     // -----------------------
-    /// Canonical PoolKey (Currency, Currency, uint24, int24, IHooks) — matches your test types
+    /// Canonical PoolKey (Currency, Currency, uint24, int24, IHooks) — matches our test types
     function poolKey()
         external
         view
@@ -357,6 +363,7 @@ contract ArbExecutor {
         uint256 minBaseOut,
         uint256 deadline
     ) external onlyOwner notPaused nonReentrant returns (int256 pnlBase) {
+        // Basic checks: deadline, inputs, and pool assets
         if (block.timestamp > deadline) revert Deadline();
         if (maxQuoteIn == 0) revert BadConfig();
         if (!_poolContainsBaseAndY(_poolKey)) revert PoolKeyMismatch();

@@ -11,7 +11,7 @@ import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {console2} from "forge-std/console2.sol";
 import {FullMath} from "v4-core/src/libraries/FullMath.sol";
-import {PegFeeMath, PegDebug} from "./lib/PegFeeMath.sol";
+import {PegFeeMath, PegDebug} from "./lib/PegFeeMath.sol"; // PegFeeMath contains the math for dynamic fee
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
 
@@ -26,6 +26,7 @@ interface IERC4626 {
     function asset() external view returns (address);
 }
 
+// Small helper to consistently sort two token addresses as (token0, token1)
 library TokenOrder {
     function sort(address a, address b) internal pure returns (address token0, address token1) {
         require(a != b, "Identical");
@@ -34,31 +35,41 @@ library TokenOrder {
     }
 }
 
+// PegHook implements a dynamic-fee policy that nudges price toward vault NAV.
+// It requires the pool to use DYNAMIC_FEE and returns override fees per swap.
 contract PegHook is BaseHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
 
     // ---- Fee parameters (unchanged) ----
+    // All fees are in hundredths of a bip (1e-6). 500 = 0.05%, 3000 = 0.3%, etc.
     uint24  public constant MIN_FEE = 500;
     uint24  public constant BASE_FEE = 3000;
     uint24  public constant MAX_FEE = 100_000;
+
+    // Deadzone where small deviations do not change the fee (in bps of price)
     uint256 public constant DEADZONE_BPS = 25;
+
+    // When deviation exceeds this threshold, we may allow arbitrage incentives
     uint256 public constant ARB_TRIGGER_BPS = 5_000;
-    uint256 public constant SLOPE_TOWARD = 150;
+
+     // Slope when the swap helps move price toward NAV
+    uint256 public constant SLOPE_TOWARD = 150; 
+
+    // Slope when the swap moves price away from NAV (penalize)
     uint256 public constant SLOPE_AWAY   = 1200;
 
-    //uint256 public priceHumanNAV = 100000;
-
     //Vault variables 
-    IERC4626 public immutable vault;
-    bool     public immutable sharesIsToken0;
-    address  public immutable assetToken; // underlying (e.g., USDC)
-    uint8    public immutable assetDec;
-    uint8    public immutable shareDec;
+    IERC4626 public immutable vault;           // ERC4626 vault (shares token address == vault address)
+    bool     public immutable sharesIsToken0;  // Whether the vault shares are token0 side of the pool
+    address  public immutable assetToken;      // underlying (e.g., USDC)
+    uint8    public immutable assetDec;        // decimals of underlying asset
+    uint8    public immutable shareDec;        // decimals of vault shares
 
  
 
-    // Your two token addresses (unsorted)
+    // Our two token addresses (unsorted)
+    // NOTE: A or B may equal the vault (shares) address; we assert one side is the vault in constructor.
     address public constant A = 0xEa812481b0bd91417AE75687eEEA13FEE1B23Cf8;
     address public constant B = 0x41de4987ba19D073383c99EB3068B3e29A5C710e;
     //address public constant A = 0xb32Da9C3d9d0bD24b647af261818739AE303648d;
@@ -71,8 +82,8 @@ contract PegHook is BaseHook {
     address public immutable token1;
     uint8   public immutable decimals0;
     uint8   public immutable decimals1;
-    //uint256 tickSpacing = 60;
 
+    // Emitted on each swap when a fee is chosen
     event FeeChosen(uint24 rawFee, uint24 withFlag, bool toward, uint256 devBps);
     error MustUseDynamicFee();
 
@@ -97,7 +108,7 @@ contract PegHook is BaseHook {
         decimals0 = IERC20Metadata(t0).decimals();
         decimals1 = IERC20Metadata(t1).decimals();
 
-    
+        // Helpful dev logs for sanity checks during deployment/testing
         console2.log("shareDec:", shareDec);
         console2.log("assetDec:", assetDec);
         console2.log("token0:", t0);
@@ -106,7 +117,7 @@ contract PegHook is BaseHook {
         console2.log("decimals1:", decimals1);
     }
 
-    // ---- permissions (unchanged) ----
+    // This hook uses beforeInitialize (enforce dynamic fee) and beforeSwap (compute fee).
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
         return Hooks.Permissions({
             beforeInitialize: true,
@@ -126,6 +137,7 @@ contract PegHook is BaseHook {
         });
     }
 
+    // Enforce that the pool must be initialized with a dynamic fee tier.
     function _beforeInitialize(address, PoolKey calldata key, uint160)
         internal pure override
         returns (bytes4)
@@ -134,6 +146,7 @@ contract PegHook is BaseHook {
         return this.beforeInitialize.selector;
     }
 
+    // Main fee override: compute dynamic fee every swap and return it with OVERRIDE flag.
     function _beforeSwap(
         address,
         PoolKey calldata key,
@@ -146,12 +159,16 @@ contract PegHook is BaseHook {
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, feeWithFlag);
     }
 
+    // View helper to preview the fee and debug info for a given direction.
     function previewFee(PoolKey calldata key, bool zeroForOne)
         external view returns (uint24 fee, PegDebug memory dbg)
     {
         return _computePegFee(key, zeroForOne);
     }
 
+    // Decode sqrtPriceX96 into:
+    // - priceHuman (token1 per token0) rounded to an integer for quick UI display
+    // - priceRawE18: full precision 1e18-scaled ratio for accurate math
     function decodePriceHuman(
         uint160 sqrtP
     ) internal view returns (uint256 priceHuman, uint256 priceRawE18) {
@@ -179,6 +196,7 @@ contract PegHook is BaseHook {
     }
 
     // (num / 10^numDec) / (den / 10^denDec) * 1e18
+    // Safe ratio that preserves precision across differing decimals.
     function _ratio1e18(
         uint256 num, uint8 numDec,
         uint256 den, uint8 denDec
@@ -205,6 +223,7 @@ contract PegHook is BaseHook {
         require(r > 0, "ratio=0");
     }
 
+    // Strict NAV (reverts on empty vault). Returns token1/token0 scaled to 1e18.
     function _nav1e18FromVault() internal view returns (uint256 out) {
         uint256 assets = vault.totalAssets();
         uint256 shares = IERC20Metadata(address(vault)).totalSupply();
@@ -218,7 +237,7 @@ contract PegHook is BaseHook {
         return out;
     }
 
-    // Lenient: safe for preview/UI (returns 0 if empty)
+    // Lenient NAV for previews/UI. Returns 0 when vault is empty.
     function nav1e18() public view returns (uint256) {
         uint256 assets = vault.totalAssets();
         uint256 shares = IERC20Metadata(address(vault)).totalSupply();
@@ -229,35 +248,10 @@ contract PegHook is BaseHook {
             : _ratio1e18(shares, shareDec, assets, assetDec);
     }
 
-    // // ---- Core fee computation (shared) ----
-    // function _computePegFee(PoolKey calldata key, bool zeroForOne)
-    //     internal view
-    //     returns (uint24 fee, PegDebug memory dbg)
-    // {
-    
-    //     (uint256 nav1e18) = _nav1e18FromVault();
-    //     console2.log("nav1e18: ", nav1e18);
-    //     (uint160 sqrtP,,,) = StateLibrary.getSlot0(poolManager, key.toId());
-
-    //     (uint256 priceHumanLP, ) = decodePriceHuman(sqrtP);
-    //     uint256 priceHumanLPe18 = priceHumanLP * 1e18;
-    //     uint256 priceHumanNAVe18 = priceHumanNAV * 1e18;
-    //     bool toward = _isTowardPeg(zeroForOne, priceHumanLPe18, priceHumanNAVe18);
-
-    //     (fee, dbg) = PegFeeMath.compute(
-    //         priceHumanLPe18,
-    //         priceHumanNAVe18,
-    //         toward,
-    //         BASE_FEE,
-    //         MIN_FEE,
-    //         MAX_FEE,
-    //         DEADZONE_BPS,
-    //         SLOPE_TOWARD,
-    //         SLOPE_AWAY,
-    //         ARB_TRIGGER_BPS
-    //     );
-    // }
-
+    // Core dynamic fee computation:
+    // 1) read vault NAV (1e18 scaled), 2) read LP price (1e18 scaled),
+    // 3) classify whether this swap direction moves toward peg,
+    // 4) call PegFeeMath to get fee and debug info.
     function _computePegFee(PoolKey calldata key, bool zeroForOne)
         internal view
         returns (uint24 fee, PegDebug memory dbg)
@@ -290,6 +284,7 @@ contract PegHook is BaseHook {
 
 
     /// priceHuman* must be token1 per token0 (same orientation), scaled to same units (e.g. 1e18)
+    // Returns true if the given swap direction would push price toward NAV.
     function _isTowardPeg(
         bool zeroForOne,
         uint256 lpPrice1e18,
@@ -307,7 +302,8 @@ contract PegHook is BaseHook {
         }
     }
 
-    // Build a PoolKey with DYNAMIC_FEE for a given tickSpacing
+    // Build a PoolKey with DYNAMIC_FEE for a given tickSpacing.
+    // Useful for frontends/scripts that want a consistent key format.
     function keyDynamic(int24 tickSpacing) public view returns (PoolKey memory key) {
         key = PoolKey({
             currency0: Currency.wrap(token0),
@@ -319,7 +315,7 @@ contract PegHook is BaseHook {
     }
 
 
-
+    // Convenience view to fetch current pool sqrtPrice and its decoded forms.
     function currentPrices(PoolKey calldata key)
         external
         view
@@ -331,6 +327,7 @@ contract PegHook is BaseHook {
 
 
     // ---------- internals ----------
+    // Fast small 10^x helper; falls back to loop for other x.
     function _pow10(uint8 x) private pure returns (uint256 r) {
         if (x == 0) return 1;
         if (x == 6)  return 1e6;
@@ -339,7 +336,7 @@ contract PegHook is BaseHook {
         r = 1; unchecked { for (uint8 i; i < x; ++i) r *= 10; }
     }
 
-    // Babylonian sqrt (256-bit)
+    // Babylonian sqrt (256-bit) for any internal math conveniences.
     function _sqrt(uint256 x) private pure returns (uint256 y) {
         if (x == 0) return 0;
         uint256 z = (x + 1) >> 1;
