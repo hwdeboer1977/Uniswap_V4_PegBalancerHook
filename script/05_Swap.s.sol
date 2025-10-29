@@ -43,7 +43,7 @@ contract SwapScript is BaseScript {
         console2.log("Address Poolmanager: ", address(poolManager));
         // Execute swap
         swapRouter.swapExactTokensForTokens({
-            amountIn: 120e6,
+            amountIn: 40e6,
             amountOutMin: 0, // Very bad, but we want to allow for unlimited price impact
             zeroForOne: true,
             poolKey: poolKey,
