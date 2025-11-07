@@ -91,6 +91,7 @@ contract PegHook is BaseHook {
     constructor(IPoolManager _poolManager, address vault_) BaseHook(_poolManager) {
 
         // Vault ERC4626
+        require(vault_ != address(0), "PegHook: vault is zero");
         vault = IERC4626(vault_);
         assetToken = IERC4626(vault_).asset();
 

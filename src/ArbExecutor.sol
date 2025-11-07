@@ -101,7 +101,7 @@ contract ArbExecutor {
     event ExecutedMintThenSell(uint256 baseIn, uint256 yMinted, uint256 baseOut, int256 pnlBase);
     event ExecutedBuyAndQueue(uint256 baseSpent, uint256 yBought, uint256 unlockAt);
     event CompletedQueuedRedeem(uint256 requestId, uint256 baseOut, int256 pnlBase);
-    event OwnerUpdated(address indexed newOwner);
+    event OwnerUpdated(address indexed previousOwner, address indexed newOwner);
     event RouterUpdated(address indexed newRouter);
     event PausedSet(bool on);
     event PoolKeyUpdated(PoolKey key);
@@ -210,8 +210,10 @@ contract ArbExecutor {
     // Admin / maintenance
     // -------------------
     function setOwner(address n) external onlyOwner {
+        if (n == address(0)) revert BadConfig(); // or a dedicated ZeroAddress() error
+        address prev = owner;
         owner = n;
-        emit OwnerUpdated(n);
+        emit OwnerUpdated(prev, n);
     }
 
     function setPaused(bool on) external onlyOwner {

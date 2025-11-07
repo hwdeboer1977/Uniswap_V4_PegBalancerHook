@@ -96,6 +96,7 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
     }
 
     function setKeeper(address keeper, bool enabled) external onlyOwner {
+        require(!enabled || keeper != address(0), "Vault: zero keeper");
         isKeeper[keeper] = enabled;
         emit KeeperSet(keeper, enabled);
     }
