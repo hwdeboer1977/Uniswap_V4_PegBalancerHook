@@ -12,7 +12,7 @@ import {LPFeeLibrary} from "v4-core/src/libraries/LPFeeLibrary.sol";
 import {BaseScript} from "./base/BaseScript.sol";
 import {LiquidityHelpers} from "./base/LiquidityHelpers.sol";
 
-// forge script script/02_AddLiquidity.s.sol --rpc-url arbitrum_sepolia --private-key 0xYOUR_PRIVATE_KEY --broadcast
+// forge script script/04_AddLiquidity.s.sol --rpc-url arbitrum_sepolia --private-key 0xYOUR_PRIVATE_KEY --broadcast
 
 contract AddLiquidityScript is BaseScript, LiquidityHelpers {
     using CurrencyLibrary for Currency;
@@ -30,8 +30,8 @@ contract AddLiquidityScript is BaseScript, LiquidityHelpers {
     // uint256 public token0Amount = 1e6;
     // uint256 public token1Amount = 1e18;
     
-    uint256 public token0Amount = 100e6;
-    uint256 public token1Amount = 100e6;
+    uint256 public token0Amount = 100000e6;
+    uint256 public token1Amount = 100000e6;
     
     /////////////////////////////////////
 
