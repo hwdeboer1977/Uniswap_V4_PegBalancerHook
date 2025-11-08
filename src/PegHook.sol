@@ -15,6 +15,7 @@ import {FullMath} from "v4-core/src/libraries/FullMath.sol";
 import {PegFeeMath, PegDebug} from "./lib/PegFeeMath.sol"; // PegFeeMath contains the math for dynamic fee
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 // ---------- ERC20 metadata & token ordering ----------
 interface IERC20Metadata {
@@ -41,6 +42,8 @@ library TokenOrder {
 contract PegHook is BaseHook {
     using LPFeeLibrary for uint24;
     using PoolIdLibrary for PoolKey;
+    using SafeCast for uint256;
+    using SafeCast for int256;
 
     // ---- Fee parameters (unchanged) ----
     // All fees are in hundredths of a bip (1e-6). 500 = 0.05%, 3000 = 0.3%, etc.
@@ -175,26 +178,26 @@ contract PegHook is BaseHook {
         uint160 sqrtP
     ) internal view returns (uint256 priceHuman, uint256 priceRawE18) {
         uint256 s   = uint256(sqrtP);
-        uint256 Q96 = 1 << 96;
+        uint256 q96 = 1 << 96;
 
         // Compute Pq96 = s^2 / 2^96 (keep it big to avoid losing tiny values)
-        uint256 Pq96 = FullMath.mulDiv(s, s, Q96); // Q96 fixed-point
+        uint256 pq96 = FullMath.mulDiv(s, s, q96); // Q96 fixed-point
 
         // ---- Human price (token1 per token0), rounded to nearest integer ----
         if (decimals0 >= decimals1) {
             // (Pq96 * 10^(decimals0-decimals1)) / 2^96, rounded
             uint256 scale = _pow10(decimals0 - decimals1);
-            uint256 num   = Pq96 * scale;
-            priceHuman    = (num + (Q96 / 2)) / Q96;
+            uint256 num   = pq96 * scale;
+            priceHuman    = (num + (q96 / 2)) / q96;
         } else {
             // (Pq96 / 2^96) / 10^(decimals1-decimals0), rounded
-            uint256 den   = Q96 * _pow10(decimals1 - decimals0);
-            priceHuman    = (Pq96 + (den / 2)) / den;
+            uint256 den   = q96 * _pow10(decimals1 - decimals0);
+            priceHuman    = (pq96 + (den / 2)) / den;
         }
 
         // ---- Raw price scaled to 1e18: (Pq96 * 1e18) / 2^96 ----
         // (scale BEFORE divide so tiny values don’t floor to 0)
-        priceRawE18 = FullMath.mulDiv(Pq96, 1e18, Q96);
+        priceRawE18 = FullMath.mulDiv(pq96, 1e18, q96);
     }
 
     // (num / 10^numDec) / (den / 10^denDec) * 1e18
@@ -207,19 +210,19 @@ contract PegHook is BaseHook {
 
         // We want: r = (num / 10^numDec) / (den / 10^denDec) * 1e18
         //        = num * 10^(18 + denDec - numDec) / den
-
-        int256 exp = int256(uint256(18))
-                + int256(uint256(denDec))
-                - int256(uint256(numDec));
+        int256 exp = uint256(18).toInt256()
+            + uint256(denDec).toInt256()
+            - uint256(numDec).toInt256();
 
         if (exp >= 0) {
-            uint256 scale = 10 ** uint256(exp);
+            // SafeCast ensures exp fits before converting to uint
+            uint256 scale = 10 ** exp.toUint256();
             r = FullMath.mulDiv(num, scale, den);
         } else {
-            uint256 scale = 10 ** uint256(-exp);
-            // Move negative exponent to denominator to keep precision
-            // r = num / den / scale, but done safely:
-            // (num * 1) / (den * scale)
+            // Use SafeCast on the negated exponent as well
+            int256 neg = -exp; // guaranteed positive here
+            uint256 scale = 10 ** neg.toUint256();
+            // r = (num / den) / scale = num / (den * scale)
             r = FullMath.mulDiv(num, 1, den * scale);
         }
         require(r > 0, "ratio=0");
@@ -321,10 +324,10 @@ contract PegHook is BaseHook {
     function currentPrices(PoolKey calldata key)
         external
         view
-        returns (uint256 priceHumanLP, uint256 priceRawE18, uint160 sqrtP)
-    {
+        returns (uint256 priceHumanLp, uint256 priceRawE18, uint160 sqrtP)
+    { 
         (sqrtP,,,) = StateLibrary.getSlot0(poolManager, key.toId());
-        (priceHumanLP, priceRawE18) = decodePriceHuman(sqrtP);
+        (priceHumanLp, priceRawE18) = decodePriceHuman(sqrtP);
     }
 
 

@@ -20,6 +20,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol"; // Import SafeCast from OpenZeppelin
 
 // ----------------------
 // Minimal interfaces
@@ -80,6 +81,9 @@ interface ITestSwapRouter {
 }
 
 contract ArbExecutor {
+    using SafeCast for uint256;  // Add SafeCast for uint256 downcasting
+    using SafeCast for int256;   // Add SafeCast for int256 downcasting
+    
     // --------
     // Errors
     // --------
@@ -127,21 +131,39 @@ contract ArbExecutor {
     // Modifiers
     // --------
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        _onlyOwner();
         _;
+    }
+            
+    function _onlyOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
     }
 
     modifier notPaused() {
-        if (paused) revert Paused();
+        _notPaused();
         _;
     }
+         
+    function _notPaused() internal view {
+        if (paused) revert Paused();
+    }
+            
 
     modifier nonReentrant() {
+        _nonReentrantBefore();
+        _;
+        _nonReentrantAfter();
+    }
+            
+    function _nonReentrantBefore() internal {
         require(_locked == 0, "REENTRANCY");
         _locked = 1;
-        _;
+    }
+            
+    function _nonReentrantAfter() internal {
         _locked = 0;
     }
+            
 
     // -----------------
     // Canonical helpers
@@ -345,10 +367,20 @@ contract ArbExecutor {
 
         // 3) PnL in BASE (measured by balance change)
         uint256 baseAfter = BASE.balanceOf(address(this));
-        pnlBase = int256(baseAfter) - int256(baseBefore);
+      
+        // baseBefore, baseAfter are uint256 balances
+        if (baseAfter >= baseBefore) {
+            // positive pnl: cast the (small) difference to int256
+            pnlBase = SafeCast.toInt256(baseAfter - baseBefore);
+        } else {
+            // negative pnl
+            pnlBase = -SafeCast.toInt256(baseBefore - baseAfter);
+        }
+
         if (pnlBase <= 0) revert NoProfit();
-        
-        uint256 baseOut = uint256(int256(baseBefore) + pnlBase); // baseAfter effectively
+
+        // baseAfter effectively, without any int->uint footgun
+        uint256 baseOut = baseBefore + SafeCast.toUint256(pnlBase);
 
         emit ExecutedMintThenSell(maxBaseToMint, yMinted, baseOut, pnlBase);
     }
@@ -398,7 +430,9 @@ contract ArbExecutor {
         if (baseOut < minBaseOut) revert MinOut();
 
         uint256 baseAfter = BASE.balanceOf(address(this));
-        pnlBase = int256(baseAfter) - int256(baseBefore);
+        //pnlBase = int256(baseAfter) - int256(baseBefore);
+        pnlBase = SafeCast.toInt256(baseAfter) - SafeCast.toInt256(baseBefore);
+
         if (pnlBase <= 0) revert NoProfit();
 
         emit ExecutedBuyThenRedeem(maxQuoteIn, yOut, baseOut, pnlBase);
@@ -475,7 +509,8 @@ contract ArbExecutor {
         if (baseOut < minBaseOut) revert MinOut();
 
         // Calculate PnL
-        pnlBase = int256(baseAfter) - int256(baseBefore);
+        //pnlBase = int256(baseAfter) - int256(baseBefore);
+        pnlBase = SafeCast.toInt256(baseAfter) - SafeCast.toInt256(baseBefore);
         if (pnlBase <= 0) revert NoProfit();
 
         emit CompletedQueuedRedeem(0, baseOut, pnlBase);

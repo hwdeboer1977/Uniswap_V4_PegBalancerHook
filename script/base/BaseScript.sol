@@ -38,7 +38,8 @@ contract BaseScript is Script {
     //IERC20 internal constant token1 = IERC20(0x6FC20bE23a51Db17e3ecad4cd48F7b91833fff88);
     
     //IHooks constant hookContract = IHooks(address(0));
-    IHooks constant hookContract = IHooks(0xf7D8f9B115a5568a6F55f43BB6eFd81717F0A080);
+    // IHooks constant hookContract = IHooks(0xf7D8f9B115a5568a6F55f43BB6eFd81717F0A080);
+    IHooks constant hookContract = IHooks(0xeE89f909e5612bfc99c46B90A1e5c6D7C2D42080);
 
     // load from .env (Foundry auto-loads .env in repo root)
     // HOOK_ADDR=0x... in your .env

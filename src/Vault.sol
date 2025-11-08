@@ -8,6 +8,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 // Vault (ERC-4626) for WBTC (8 decimals)
 // 4626 vault with: pause, global TVL cap, per-user cumulative cap,
@@ -15,6 +16,8 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 // When we deploy capital externally to other protocols, totalAssets() includes external NAV.
 contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using SafeCast for int256;
+    using SafeCast for uint256;
 
     /* ========= Caps & Floors ========= */
     // Global TVL cap in underlying (WBTC units, 8 decimals).
@@ -35,8 +38,8 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
     // Recipient B (e.g., Hyperliquid collateral wallet).
     address public recipientB;
 
-    // Split for A in basis points (A gets splitA_BPS, B gets 10000 - splitA_BPS).
-    uint16 public splitA_BPS;
+    // Split for A in basis points (A gets splitA_Bps, B gets 10000 - splitA_Bps).
+    uint16 public splitABps;
 
     // Minimum amount (in WBTC units) required to call rebalance().
     uint256 public rebalanceMin;
@@ -60,7 +63,7 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
     event PerUserDepositCapUpdated(uint256 oldCap, uint256 newCap);
 
     event RecipientsUpdated(address recipientA, address recipientB);
-    event SplitUpdated(uint16 splitA_BPS);
+    event SplitUpdated(uint16 splitABps);
     event RebalanceMinUpdated(uint256 minAmount);
 
     event Rebalanced(uint256 amount, uint256 toA, uint256 toB);
@@ -89,7 +92,7 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
         depositMin = 0;
         perUserDepositCap = 0;
 
-        splitA_BPS = 8500; // 85% to A, 15% to B
+        splitABps = 8500; // 85% to A, 15% to B
         rebalanceMin = 0;  // off by default until set
 
         redemptionPeriod = _initialRedemptionPeriod;
@@ -102,9 +105,15 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
     }
 
     modifier onlyKeeperOrOwner() {
-        require(isKeeper[msg.sender] || msg.sender == owner(), "not keeper/owner");
+        _onlyKeeperOrOwner();
         _;
-    }
+        } 
+
+    function _onlyKeeperOrOwner() internal view {
+        require(isKeeper[msg.sender] || msg.sender == owner(), "not keeper/owner");
+     }
+
+    
 
     // Only the owner/deployer can change the redemption period
     function setRedemptionPeriod(uint256 newPeriod) external onlyOwner {
@@ -149,18 +158,18 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
     /* ========= Admin (rebalance config) ========= */
 
     // Set wallets A and B
-    function setRecipients(address _A, address _B) external onlyOwner {
-        require(_A != address(0) && _B != address(0), "zero recipient");
-        recipientA = _A;
-        recipientB = _B;
-        emit RecipientsUpdated(_A, _B);
+    function setRecipients(address _a, address _b) external onlyOwner {
+        require(_a != address(0) && _b != address(0), "zero recipient");
+        recipientA = _a;
+        recipientB = _b;
+        emit RecipientsUpdated(_a, _b);
     }
 
     // Set ratio to distribute to A and B
-    function setSplitBPS(uint16 _splitA_BPS) external onlyOwner {
-        require(_splitA_BPS <= MAX_BPS, "split > 100%");
-        splitA_BPS = _splitA_BPS;
-        emit SplitUpdated(_splitA_BPS);
+    function setSplitBps(uint16 _splitABps) external onlyOwner {
+        require(_splitABps <= MAX_BPS, "split > 100%");
+        splitABps = _splitABps;
+        emit SplitUpdated(_splitABps);
     }
 
     // Set the minimum amount required to call rebalance().
@@ -172,11 +181,13 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
 
     // Owner reports new off-chain NAV (in WBTC units, 8 decimals).
     // Call this periodically to reflect PnL from Drift/Hyperliquid legs.
+    // Use Safecast lib for adjustExternalNav to be fully safe
     function adjustExternalNav(int256 delta) external onlyKeeperOrOwner {
         if (delta >= 0) {
-            externalNav += uint256(delta);
+            // SafeCast ensures no truncation
+            externalNav += delta.toUint256();
         } else {
-            uint256 abs = uint256(-delta);
+            uint256 abs = _absToUint256(delta); // safe even for INT256_MIN
             require(abs <= externalNav, "nav underflow");
             externalNav -= abs;
         }
@@ -421,7 +432,7 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
         uint256 idle = idleAssets();
         require(amount <= idle, "insufficient idle");
 
-        uint256 toA = (amount * splitA_BPS) / MAX_BPS;
+        uint256 toA = (amount * splitABps) / MAX_BPS;
         uint256 toB = amount - toA;
 
         IERC20(asset()).safeTransfer(recipientA, toA);
@@ -431,6 +442,20 @@ contract Vault is ERC20, ERC4626, Ownable, Pausable, ReentrancyGuard {
         externalNav += amount;
 
         emit Rebalanced(amount, toA, toB);
+    }
+
+    // Helper function for absolute value without overflow
+    // Returns |x| as uint256 without ever overflowing (handles INT256_MIN).
+    function _absToUint256(int256 x) internal pure returns (uint256) {
+        if (x >= 0) {
+            // Safe: x is non-negative → fits in uint256
+            return x.toUint256();
+        }
+        unchecked {
+            // For negative x, avoid -INT256_MIN overflow:
+            // |x| = uint256( -(x + 1) ) + 1
+            return uint256(uint256(-(x + 1)) + 1);
+        }
     }
 
 
