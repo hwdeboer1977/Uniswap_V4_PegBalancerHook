@@ -30,7 +30,7 @@ contract DeployHookScript is BaseScript {
     function run() public {
 
         
-        address vault = 0x41de4987ba19D073383c99EB3068B3e29A5C710e;
+        address vault = 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0;
         //address vault = 0xb32Da9C3d9d0bD24b647af261818739AE303648d;
         //address vault = 0x6FC20bE23a51Db17e3ecad4cd48F7b91833fff88;
         //address vault = vm.envOr("TOKEN_VAULT", address(0));

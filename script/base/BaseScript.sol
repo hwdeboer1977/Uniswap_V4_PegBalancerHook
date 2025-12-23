@@ -26,8 +26,8 @@ contract BaseScript is Script {
     /////////////////////////////////////
 
     // USDC on Sepolia Arbitrum Fork
-    IERC20 internal constant token0 = IERC20(0xEa812481b0bd91417AE75687eEEA13FEE1B23Cf8);
-    IERC20 internal constant token1 = IERC20(0x41de4987ba19D073383c99EB3068B3e29A5C710e);
+    IERC20 internal constant token0 = IERC20(0x5FbDB2315678afecb367f032d93F642f64180aa3);
+    IERC20 internal constant token1 = IERC20(0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0);
     
     // USDC on Sepolia Arbitrum
     //IERC20 internal constant token0 = IERC20(0xb32Da9C3d9d0bD24b647af261818739AE303648d);
